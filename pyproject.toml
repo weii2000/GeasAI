@@ -1,0 +1,8 @@
+[project]
+name = "geasai"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "jsonschema>=4.26.0",
+    "openai>=2.49.0",
+]
