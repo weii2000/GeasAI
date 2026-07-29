@@ -178,7 +178,7 @@ async def _run_agent_loop(
             output.push(TurnStartEvent(type="turn_start"))
 
         ai_context = Context(
-            messages=current_messages,
+            messages=[*current_messages],
             system_prompt=context.system_prompt,
             tools=list(context.tools) or None,
         )
@@ -282,13 +282,18 @@ async def _run_agent_loop(
                 )
             )
 
-        output.push(
-            TurnEndEvent(
-                type="turn_end",
-                message=assistant_message,
-                tool_results=tool_results,
-            )
+        turn_end = TurnEndEvent(
+            type="turn_end",
+            message=assistant_message,
+            tool_results=tool_results,
         )
+        output.push(turn_end)
+
+        if (
+            config.should_stop_after_turn is not None
+            and await config.should_stop_after_turn(turn_end)
+        ):
+            break
 
         if config.prepare_next_turn is not None:
             next_context = await config.prepare_next_turn(

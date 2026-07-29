@@ -14,6 +14,7 @@ from .types import (
     MessageStartEvent,
     MessageUpdateEvent,
     PrepareNextTurn,
+    ShouldStopAfterTurn,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
     TurnEndEvent,
@@ -28,10 +29,12 @@ class Agent:
         state: AgentState,
         stream_function: StreamFunction,
         prepare_next_turn: PrepareNextTurn | None = None,
+        should_stop_after_turn: ShouldStopAfterTurn | None = None,
     ) -> None:
         self.state = state
         self._stream_function = stream_function
         self.prepare_next_turn = prepare_next_turn
+        self.should_stop_after_turn = should_stop_after_turn
         self._listeners: set[AgentListener] = set()
 
     def subscribe(
@@ -66,6 +69,7 @@ class Agent:
                 config=AgentLoopConfig(
                     model=self.state.model,
                     prepare_next_turn=self.prepare_next_turn,
+                    should_stop_after_turn=self.should_stop_after_turn,
                 ),
                 stream_function=self._stream_function,
             )

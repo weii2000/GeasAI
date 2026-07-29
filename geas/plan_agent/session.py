@@ -3,7 +3,7 @@ from dataclasses import asdict
 from datetime import datetime
 
 from geas.core.agent import Agent
-from geas.core.types import AgentContext, AgentTool
+from geas.core.types import AgentContext, AgentTool, TurnEndEvent
 
 from .profiles import BASE_PROFILE, PHASE_PROFILES
 from .tools import create_plan_agent_tools
@@ -11,8 +11,16 @@ from .types import IssueSeverity, Phase, Plan, ReviewReport
 
 
 class PlanSession:
-    def __init__(self, agent: Agent) -> None:
-        self.agent = agent
+    def __init__(
+        self,
+        plan_agent: Agent,
+        review_agent: Agent,
+    ) -> None:
+        if plan_agent is review_agent:
+            raise ValueError("Plan and review agents must be different")
+
+        self.plan_agent = plan_agent
+        self.review_agent = review_agent
         self.plan = Plan()
         self.review_report: ReviewReport | None = None
         self.phase = Phase.PLAN
@@ -23,7 +31,20 @@ class PlanSession:
         }
         self.base_profile = BASE_PROFILE
         self.profiles = PHASE_PROFILES
-        self.agent.prepare_next_turn = self.prepare_next_turn
+        self.plan_agent.prepare_next_turn = (
+            self._prepare_plan_next_turn
+        )
+        self.review_agent.prepare_next_turn = (
+            self._prepare_review_next_turn
+        )
+        self.plan_agent.should_stop_after_turn = (
+            self._stop_plan_after_turn
+        )
+        self.review_agent.should_stop_after_turn = (
+            self._stop_review_after_turn
+        )
+        self._sync_agent(self.plan_agent, Phase.PLAN)
+        self._sync_agent(self.review_agent, Phase.REVIEW)
 
     def update_plan(self, plan: Plan) -> None:
         self.plan = plan
@@ -50,19 +71,18 @@ class PlanSession:
 
         self.phase = Phase.IDLE
 
-    @property
-    def active_tools(self) -> list[AgentTool]:
+    def tools_for(self, phase: Phase) -> list[AgentTool]:
         tool_names = (
             *self.base_profile.tools,
-            *self.profiles[self.phase].tools,
+            *self.profiles[phase].tools,
         )
         return [
             self._tools[name]
             for name in tool_names
         ]
 
-    def build_system_prompt(self) -> str:
-        profile = self.profiles[self.phase]
+    def build_system_prompt(self, profile_phase: Phase) -> str:
+        profile = self.profiles[profile_phase]
         skills = [*self.base_profile.skills, *profile.skills]
         sections = [
             self.base_profile.prompt,
@@ -99,21 +119,73 @@ class PlanSession:
         )
         return "\n\n".join(section for section in sections if section)
 
-    async def prepare_next_turn(
+    async def _prepare_plan_next_turn(
         self,
         context: AgentContext,
     ) -> AgentContext:
-        self._sync_agent_state()
-        return AgentContext(
-            messages=[*context.messages],
-            system_prompt=self.agent.state.system_prompt,
-            tools=[*self.agent.state.tools],
+        return self._prepare_next_turn(
+            self.plan_agent,
+            Phase.PLAN,
+            context,
         )
 
-    async def prompt(self, text: str) -> None:
-        self._sync_agent_state()
-        await self.agent.prompt(text)
+    async def _prepare_review_next_turn(
+        self,
+        context: AgentContext,
+    ) -> AgentContext:
+        return self._prepare_next_turn(
+            self.review_agent,
+            Phase.REVIEW,
+            context,
+        )
 
-    def _sync_agent_state(self) -> None:
-        self.agent.state.system_prompt = self.build_system_prompt()
-        self.agent.state.tools = self.active_tools
+    def _prepare_next_turn(
+        self,
+        agent: Agent,
+        phase: Phase,
+        context: AgentContext,
+    ) -> AgentContext:
+        self._sync_agent(agent, phase)
+        return AgentContext(
+            messages=[*context.messages],
+            system_prompt=agent.state.system_prompt,
+            tools=[*agent.state.tools],
+        )
+
+    async def _stop_plan_after_turn(
+        self,
+        _event: TurnEndEvent,
+    ) -> bool:
+        return self.phase is not Phase.PLAN
+
+    async def _stop_review_after_turn(
+        self,
+        _event: TurnEndEvent,
+    ) -> bool:
+        return self.phase is not Phase.REVIEW
+
+    async def prompt(self, text: str) -> None:
+        next_prompt = text
+
+        while self.phase is not Phase.IDLE:
+            starting_phase = self.phase
+            agent = (
+                self.plan_agent
+                if starting_phase is Phase.PLAN
+                else self.review_agent
+            )
+            self._sync_agent(agent, starting_phase)
+            await agent.prompt(next_prompt)
+
+            if self.phase is starting_phase or self.phase is Phase.IDLE:
+                break
+
+            next_prompt = (
+                "请独立审查 Current session state 中已提交的计划。"
+                if self.phase is Phase.REVIEW
+                else "请根据 Current session state 中的评审报告修改计划。"
+            )
+
+    def _sync_agent(self, agent: Agent, phase: Phase) -> None:
+        agent.state.system_prompt = self.build_system_prompt(phase)
+        agent.state.tools = self.tools_for(phase)

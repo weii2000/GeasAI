@@ -43,6 +43,11 @@ type PrepareNextTurn = Callable[
     Awaitable[AgentContext | None],
 ]
 
+type ShouldStopAfterTurn = Callable[
+    ["TurnEndEvent"],
+    Awaitable[bool],
+]
+
 
 @dataclass
 class AgentState:
@@ -60,6 +65,7 @@ class AgentState:
 class AgentLoopConfig:
     model: Model
     prepare_next_turn: PrepareNextTurn | None = None
+    should_stop_after_turn: ShouldStopAfterTurn | None = None
 
 
 @dataclass

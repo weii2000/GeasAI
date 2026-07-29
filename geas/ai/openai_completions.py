@@ -38,6 +38,31 @@ from .types import (
     UserMessage,
 )
 
+_REASONING_FIELDS = (
+    "reasoning_content",
+    "reasoning",
+    "reasoning_text",
+)
+
+
+def _reasoning_delta(delta: object) -> tuple[str, str] | None:
+    for field in _REASONING_FIELDS:
+        value = getattr(delta, field, None)
+        if isinstance(value, str) and value:
+            return field, value
+    return None
+
+
+def _requires_reasoning_content(model: Model) -> bool:
+    detected = (
+        model.provider == "deepseek"
+        or "deepseek.com" in model.base_url
+    )
+    override = (model.compat or {}).get(
+        "requires_reasoning_content_on_assistant_messages"
+    )
+    return override if isinstance(override, bool) else detected
+
 
 def _content_to_text(
     content: str | list[TextContent | ImageContent],
@@ -59,6 +84,7 @@ def _content_to_text(
 
 
 def _convert_messages(
+    model: Model,
     context: Context,
 ) -> list[ChatCompletionMessageParam]:
     messages: list[ChatCompletionMessageParam] = []
@@ -83,10 +109,13 @@ def _convert_messages(
                 for block in message.content
                 if isinstance(block, TextContent)
             )
-            thinking = "\n".join(
-                block.thinking
+            thinking_blocks = [
+                block
                 for block in message.content
                 if isinstance(block, ThinkingContent)
+            ]
+            thinking = "\n".join(
+                block.thinking for block in thinking_blocks
             )
             tool_calls = [
                 block
@@ -102,8 +131,37 @@ def _convert_messages(
                 "content": text or None,
             }
 
-            if thinking or tool_calls:
+            signature = next(
+                (
+                    block.thinking_signature
+                    for block in thinking_blocks
+                    if block.thinking_signature
+                ),
+                None,
+            )
+            same_provider = message.provider == model.provider
+
+            if thinking and same_provider and signature:
+                assistant_message[signature] = thinking
+            elif thinking and same_provider and _requires_reasoning_content(
+                model
+            ):
                 assistant_message["reasoning_content"] = thinking
+            elif thinking:
+                assistant_message["content"] = "\n\n".join(
+                    part
+                    for part in (
+                        f"<thinking>\n{thinking}\n</thinking>",
+                        text,
+                    )
+                    if part
+                )
+
+            if (
+                model.reasoning
+                and _requires_reasoning_content(model)
+            ):
+                assistant_message.setdefault("reasoning_content", "")
 
             if tool_calls:
                 assistant_message["tool_calls"] = [
@@ -290,7 +348,7 @@ async def _run_stream(
         ) as client:
             response = await client.chat.completions.create(
                 model=model.id,
-                messages=_convert_messages(context),
+                messages=_convert_messages(model, context),
                 stream=True,
                 stream_options={"include_usage": True},
                 temperature=options.temperature if options else None,
@@ -309,17 +367,15 @@ async def _run_stream(
                     continue
 
                 choice = chunk.choices[0]
-                reasoning_delta = getattr(
-                    choice.delta,
-                    "reasoning_content",
-                    None,
-                )
+                reasoning = _reasoning_delta(choice.delta)
 
-                if isinstance(reasoning_delta, str) and reasoning_delta:
+                if reasoning is not None:
+                    reasoning_field, reasoning_delta = reasoning
                     if thinking is None:
                         thinking = ThinkingContent(
                             type="thinking",
                             thinking="",
+                            thinking_signature=reasoning_field,
                         )
                         partial.content.append(thinking)
                         thinking_open = True
