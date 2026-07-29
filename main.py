@@ -1,11 +1,21 @@
 import asyncio
+import json
+
+from prompt_toolkit import PromptSession
 
 from geas.ai.deepseek_models import DEEPSEEK_MODELS
 from geas.ai.models import Models
 from geas.ai.openai_completions import stream_openai_completions
-from geas.ai.types import AssistantMessage, TextDeltaEvent
+from geas.ai.types import TextDeltaEvent
 from geas.core.agent import Agent
-from geas.core.types import AgentEvent, AgentState, MessageUpdateEvent
+from geas.core.types import (
+    AgentEvent,
+    AgentState,
+    MessageUpdateEvent,
+    ToolExecutionEndEvent,
+    ToolExecutionStartEvent,
+)
+from geas.plan_agent.session import PlanSession
 
 
 async def main() -> None:
@@ -21,6 +31,7 @@ async def main() -> None:
         state=AgentState(model=model),
         stream_function=models.stream,
     )
+    session = PlanSession(agent)
 
     def print_stream(event: AgentEvent) -> None:
         if isinstance(event, MessageUpdateEvent):
@@ -28,13 +39,38 @@ async def main() -> None:
 
             if isinstance(assistant_event, TextDeltaEvent):
                 print(assistant_event.delta, end="", flush=True)
+        elif isinstance(event, ToolExecutionStartEvent):
+            arguments = json.dumps(event.args, ensure_ascii=False)
+            print(f"\n[tool] {event.tool_name} {arguments}")
+        elif isinstance(event, ToolExecutionEndEvent):
+            status = "error" if event.is_error else "ok"
+            print(f"[tool:{status}] {event.tool_name}")
 
     agent.subscribe(print_stream)
-    await agent.prompt("你好，请用一句话介绍自己。")
-    last_message = agent.state.messages[-1]
+    console = PromptSession[str]()
+    print("Geas Plan Agent（输入 /quit 退出）")
 
-    if isinstance(last_message, AssistantMessage):
-        print(f"\n\nstop_reason={last_message.stop_reason}")
+    while True:
+        try:
+            text = (
+                await console.prompt_async("\nYou> ")
+            ).strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+
+        if text == "/quit":
+            break
+        if not text:
+            continue
+
+        print("Geas> ", end="", flush=True)
+        try:
+            await session.prompt(text)
+        except Exception as error:
+            print(f"\n[error] {error}")
+        else:
+            print(f"\n[phase: {session.phase}]")
 
 
 if __name__ == "__main__":
