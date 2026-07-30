@@ -36,18 +36,35 @@ from geas.mcp import MCPRegistry, create_mcp_call_tool
 from geas.plan_agent.profiles import load_skill_profiles
 from geas.plan_agent.session import PlanSession
 from geas.plan_agent.session_manager import SessionManager
-from geas.plan_agent.types import Phase
+from geas.plan_agent.types import Phase, Plan
+from geas.actions.publish_plan import (
+    PLANWISE_SERVER_NAME,
+    publish_plan,
+)
 
 
 class RPCServer:
     def __init__(
         self,
         models: Models,
-        extra_tools: list[AgentTool],
+        mcp_registry: MCPRegistry,
         skills_root: Path,
     ) -> None:
         self.models = models
-        self.extra_tools = extra_tools
+        self.mcp_registry = mcp_registry
+        agent_servers = [
+            server
+            for server in mcp_registry.servers
+            if server != PLANWISE_SERVER_NAME
+        ]
+        self.extra_tools: list[AgentTool] = (
+            [create_mcp_call_tool(mcp_registry, agent_servers)]
+            if agent_servers
+            else []
+        )
+        self.planwise_enabled = (
+            PLANWISE_SERVER_NAME in mcp_registry.servers
+        )
         self.skills_root = skills_root
         self.manager = SessionManager.create()
         self.session: PlanSession | None = None
@@ -78,8 +95,10 @@ class RPCServer:
             text = _require_str(params, "text")
             if not text.strip():
                 raise ValueError("Prompt cannot be empty")
-            await session.prompt(text)
-            self.manager.save(session)
+            try:
+                await session.prompt(text)
+            finally:
+                self.manager.save(session)
             return self.state()
         if method == "new_session":
             self._new_session()
@@ -231,6 +250,11 @@ class RPCServer:
     def _bind_session(self, session: PlanSession) -> None:
         self._unsubscribe()
         self.session = session
+        session.on_plan_approved = (
+            self._publish_plan
+            if self.planwise_enabled
+            else None
+        )
         self._unsubscribers = [
             session.plan_agent.subscribe(
                 lambda event: self._emit_agent_event(event, "PLAN")
@@ -239,6 +263,20 @@ class RPCServer:
                 lambda event: self._emit_agent_event(event, "REVIEW")
             ),
         ]
+
+    async def _publish_plan(self, plan: Plan) -> None:
+        publication = await publish_plan(
+            self.mcp_registry,
+            self.manager.session_id,
+            plan,
+        )
+        _send({
+            "type": "event",
+            "event": "plan_published",
+            "plan_id": publication.plan_id,
+            "plan_title": publication.plan_title,
+            "created_task_count": publication.created_task_count,
+        })
 
     def _unsubscribe(self) -> None:
         for unsubscribe in self._unsubscribers:
@@ -377,8 +415,7 @@ async def main() -> None:
     models = builtin_models()
     servers = load_mcp_servers()
     async with MCPRegistry(servers) as registry:
-        tools = [create_mcp_call_tool(registry)] if servers else []
-        server = RPCServer(models, tools, Path.cwd() / "skills")
+        server = RPCServer(models, registry, Path.cwd() / "skills")
         try:
             await _serve(server)
         finally:

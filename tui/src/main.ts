@@ -70,6 +70,12 @@ type RPCEvent =
   | { event: "assistant_start"; phase: AgentPhase }
   | { event: "text_delta"; phase: AgentPhase; delta: string }
   | {
+      event: "plan_published";
+      plan_id: number;
+      plan_title: string;
+      created_task_count: number;
+    }
+  | {
       event: "tool_start";
       phase: AgentPhase;
       tool_call_id: string;
@@ -386,6 +392,19 @@ class GeasTUI {
       }
       this.streaming.text += event.delta;
       this.streaming.block.setText(this.streaming.text);
+    } else if (event.event === "plan_published") {
+      this.streaming = null;
+      this.chat.addChild(
+        new Text(
+          chalk.green(
+            `✓ 已保存到 PlanWise\n` +
+              `${event.plan_title} · Plan #${event.plan_id} · ` +
+              `${event.created_task_count} tasks`,
+          ),
+          1,
+          1,
+        ),
+      );
     } else if (event.event === "tool_start") {
       this.streaming = null;
       const args = JSON.stringify(event.args);

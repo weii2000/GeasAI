@@ -1,4 +1,6 @@
 import asyncio
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -44,6 +46,7 @@ def test_plan_session_runs_plan_review_to_idle() -> None:
                     make_tool_call(
                         "update_plan",
                         {
+                            "title": "发布 Geas",
                             "goal": "发布 Geas",
                             "description": "完成可运行的 Agent",
                             "acceptance_criterion": "可以完成规划和评审",
@@ -87,6 +90,7 @@ def test_plan_session_runs_plan_review_to_idle() -> None:
     asyncio.run(session.prompt("每天两个小时"))
 
     assert session.phase is Phase.IDLE
+    assert session.plan.title == "发布 Geas"
     assert session.plan.goal == "发布 Geas"
     assert session.plan.constraints == ["仅使用 Python"]
     assert session.review_report == ReviewReport(
@@ -238,13 +242,93 @@ def test_task_tree_rejects_skipped_levels() -> None:
         )
 
 
+def test_task_rejects_invalid_time_range() -> None:
+    london = ZoneInfo("Europe/London")
+    with pytest.raises(ValueError, match="timezone"):
+        Task(
+            title="无时区任务",
+            level=1,
+            start_time=datetime(2026, 8, 1),
+        )
+    with pytest.raises(ValueError, match="before start time"):
+        Task(
+            title="倒序任务",
+            level=1,
+            start_time=datetime(2026, 8, 2, tzinfo=london),
+            due_time=datetime(2026, 8, 1, tzinfo=london),
+        )
+
+
+def test_plan_rejects_more_than_100_tasks() -> None:
+    with pytest.raises(ValueError, match="more than 100"):
+        Plan(
+            tasks=[
+                Task(title=f"任务 {index}", level=1)
+                for index in range(101)
+            ]
+        )
+
+
+def test_failed_plan_publication_can_be_retried() -> None:
+    approval = make_assistant(
+        [
+            make_tool_call(
+                "update_review_report",
+                {"summary": "可以执行", "issues": []},
+            ),
+            make_tool_call("approve_plan", {}),
+        ],
+        "toolUse",
+    )
+    session, _plan_model, _review_model = make_session(
+        [],
+        review_responses=[approval, approval],
+    )
+    session.phase = Phase.REVIEW
+    session.plan = Plan(
+        title="发布 Geas",
+        goal="完成 Agent",
+        tasks=[Task(title="发布", level=1)],
+    )
+    attempts: list[Plan] = []
+
+    async def fail(plan: Plan) -> None:
+        attempts.append(plan)
+        raise RuntimeError("PlanWise unavailable")
+
+    session.on_plan_approved = fail
+    with pytest.raises(RuntimeError, match="unavailable"):
+        asyncio.run(session.prompt("批准计划"))
+
+    assert session.phase is Phase.REVIEW
+    assert attempts == [session.plan]
+
+    async def succeed(plan: Plan) -> None:
+        attempts.append(plan)
+
+    session.on_plan_approved = succeed
+    asyncio.run(session.prompt("重试"))
+
+    assert session.phase is Phase.IDLE
+    assert attempts == [session.plan, session.plan]
+
+
 def test_session_manager_restores_checkpoint(tmp_path) -> None:
     session, plan_model, _review_model = make_session([])
     session.phase = Phase.REVIEW
     session.plan = Plan(
+        title="Geas 发布计划",
         goal="发布 Geas",
         constraints=["仅使用 Python"],
-        tasks=[Task(title="实现持久化", level=1)],
+        tasks=[
+            Task(
+                title="实现持久化",
+                level=1,
+                start_time=datetime.fromisoformat(
+                    "2026-08-01T09:00:00+01:00"
+                ),
+            )
+        ],
     )
     session.review_report = ReviewReport(summary="等待评审")
     session.plan_agent.state.messages = [

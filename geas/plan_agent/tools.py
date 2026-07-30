@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import signal
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -31,11 +32,22 @@ _BASH_OUTPUT_LIMIT = 100_000
 _TASK_SCHEMA: dict[str, object] = {
     "type": "object",
     "properties": {
-        "title": {"type": "string"},
+        "title": {"type": "string", "minLength": 1},
         "level": {"type": "integer", "enum": [1, 2, 3]},
         "status": {
             "type": "string",
             "enum": [status.value for status in TaskStatus],
+        },
+        "acceptance_criteria": {
+            "type": ["string", "null"],
+        },
+        "start_time": {
+            "type": ["string", "null"],
+            "format": "date-time",
+        },
+        "due_time": {
+            "type": ["string", "null"],
+            "format": "date-time",
         },
         "subtasks": {
             "type": "array",
@@ -49,7 +61,8 @@ _TASK_SCHEMA: dict[str, object] = {
 _UPDATE_PLAN_PARAMETERS: dict[str, object] = {
     "type": "object",
     "properties": {
-        "goal": {"type": "string"},
+        "title": {"type": "string", "minLength": 1},
+        "goal": {"type": "string", "minLength": 1},
         "description": {"type": "string"},
         "acceptance_criterion": {"type": "string"},
         "constraints": {
@@ -62,9 +75,12 @@ _UPDATE_PLAN_PARAMETERS: dict[str, object] = {
         "tasks": {
             "type": "array",
             "items": {"$ref": "#/$defs/task"},
+            "minItems": 1,
+            "maxItems": 100,
         },
     },
     "required": [
+        "title",
         "goal",
         "description",
         "acceptance_criterion",
@@ -245,6 +261,7 @@ def create_plan_agent_tools(session: PlanSession) -> list[AgentTool]:
     ) -> AgentToolResult:
         session.update_plan(
             Plan(
+                title=str(args["title"]),
                 goal=str(args["goal"]),
                 description=str(args["description"]),
                 acceptance_criterion=str(args["acceptance_criterion"]),
@@ -366,8 +383,26 @@ def _task_from_dict(data: object) -> Task:
         title=str(data["title"]),
         level=data["level"],  # type: ignore[arg-type]
         status=TaskStatus(str(data.get("status", TaskStatus.PENDING))),
+        acceptance_criteria=(
+            str(data["acceptance_criteria"])
+            if data.get("acceptance_criteria") is not None
+            else None
+        ),
+        start_time=_optional_datetime(data.get("start_time")),
+        due_time=_optional_datetime(data.get("due_time")),
         subtasks=[_task_from_dict(subtask) for subtask in subtasks],
     )
+
+
+def _optional_datetime(value: object) -> datetime | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise TypeError("Task time must be an ISO 8601 string or null")
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError(f'Invalid Task time: "{value}"') from error
 
 
 def _review_issue_from_dict(data: object) -> ReviewIssue:

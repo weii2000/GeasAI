@@ -1,4 +1,5 @@
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict
 from datetime import datetime
 
@@ -23,6 +24,8 @@ from .types import (
     ReviewReport,
 )
 
+type OnPlanApproved = Callable[[Plan], Awaitable[None]]
+
 
 class PlanSession:
     def __init__(
@@ -33,6 +36,7 @@ class PlanSession:
         base_profile: Profile = BASE_PROFILE,
         profiles: dict[Phase, Profile] | None = None,
         extra_tools: list[AgentTool] | None = None,
+        on_plan_approved: OnPlanApproved | None = None,
     ) -> None:
         if plan_agent is review_agent:
             raise ValueError("Plan and review agents must be different")
@@ -43,6 +47,7 @@ class PlanSession:
         self.review_report: ReviewReport | None = None
         self.phase = Phase.PLAN
         self.conversation: list[ConversationMessage] = []
+        self.on_plan_approved = on_plan_approved
         self.skill_registry = skill_registry or SkillRegistry()
         self.base_profile = base_profile
         self.profiles = (
@@ -176,6 +181,7 @@ class PlanSession:
                 },
                 ensure_ascii=False,
                 indent=2,
+                default=lambda value: value.isoformat(),
             )
         )
         return "\n\n".join(section for section in sections if section)
@@ -252,6 +258,13 @@ class PlanSession:
                 break
 
             next_prompt = "请根据当前阶段和 Current session state 继续。"
+
+        if self.phase is Phase.IDLE and self.on_plan_approved is not None:
+            try:
+                await self.on_plan_approved(self.plan)
+            except BaseException:
+                self.phase = Phase.REVIEW
+                raise
 
     def _record_assistant_text(
         self,

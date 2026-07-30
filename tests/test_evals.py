@@ -36,6 +36,7 @@ def test_single_phase_eval_rejects_overdecomposed_plan() -> None:
     session, _plan_model, _review_model = make_session([])
     session.phase = Phase.REVIEW
     session.plan = Plan(
+        title="FastAPI 任务管理 API",
         goal="完成项目",
         description="四周完成任务管理 API",
         acceptance_criterion="核心接口测试通过",

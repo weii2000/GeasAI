@@ -29,6 +29,7 @@ from geas.plan_agent.types import (
     ReviewReport,
     Task,
     TaskLevel,
+    TaskStatus,
 )
 
 DEFAULT_SUITE_PATH = Path(__file__).with_name(
@@ -178,6 +179,7 @@ def _parse_plan(data: dict[str, object]) -> Plan:
     if not isinstance(constraints, list):
         raise TypeError("Plan constraints must be a list")
     return Plan(
+        title=str(data.get("title", "")),
         goal=str(data.get("goal", "")),
         description=str(data.get("description", "")),
         acceptance_criterion=str(data.get("acceptance_criterion", "")),
@@ -198,8 +200,20 @@ def _parse_task(data: object) -> Task:
     return Task(
         title=str(data["title"]),
         level=cast(TaskLevel, level),
+        status=TaskStatus(str(data.get("status", TaskStatus.PENDING))),
+        acceptance_criteria=(
+            str(data["acceptance_criteria"])
+            if data.get("acceptance_criteria") is not None
+            else None
+        ),
+        start_time=_parse_datetime(data.get("start_time")),
+        due_time=_parse_datetime(data.get("due_time")),
         subtasks=[_parse_task(subtask) for subtask in subtasks],
     )
+
+
+def _parse_datetime(value: object) -> datetime | None:
+    return datetime.fromisoformat(str(value)) if value is not None else None
 
 
 def _parse_review_report(data: dict[str, object]) -> ReviewReport:
@@ -315,6 +329,7 @@ def _score(
     if expected.require_complete_plan:
         complete = all(
             (
+                session.plan.title.strip(),
                 session.plan.goal.strip(),
                 session.plan.description.strip(),
                 session.plan.acceptance_criterion.strip(),
@@ -388,7 +403,11 @@ def _score(
     if expected.required_plan_terms:
         checks.append(_term_check(
             "plan_terms",
-            json.dumps(asdict(session.plan), ensure_ascii=False),
+            json.dumps(
+                asdict(session.plan),
+                ensure_ascii=False,
+                default=_json_default,
+            ),
             expected.required_plan_terms,
         ))
 
@@ -667,10 +686,21 @@ def save_results(
         "results": results,
     }
     path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            indent=2,
+            default=_json_default,
+        ),
         encoding="utf-8",
     )
     return path
+
+
+def _json_default(value: object) -> str:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    raise TypeError(f"{type(value).__name__} is not JSON serializable")
 
 
 def parse_args() -> argparse.Namespace:

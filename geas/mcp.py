@@ -113,17 +113,31 @@ class MCPRegistry:
         return client
 
 
-def create_mcp_call_tool(registry: MCPRegistry) -> AgentTool:
+def create_mcp_call_tool(
+    registry: MCPRegistry,
+    allowed_servers: list[str] | None = None,
+) -> AgentTool:
+    servers = (
+        list(registry.servers)
+        if allowed_servers is None
+        else allowed_servers
+    )
+    if unknown := set(servers) - registry.servers.keys():
+        raise ValueError(f"Unknown MCP servers: {sorted(unknown)}")
+
     async def execute(
         _tool_call_id: str,
         arguments: dict[str, object],
     ) -> AgentToolResult:
+        server = str(arguments["server"])
+        if server not in servers:
+            raise ValueError(f'MCP server "{server}" is not available')
         tool_arguments = arguments["arguments"]
         if not isinstance(tool_arguments, dict):
             raise TypeError("MCP tool arguments must be an object")
 
         return await registry.call(
-            server=str(arguments["server"]),
+            server=server,
             tool=str(arguments["tool"]),
             arguments=tool_arguments,
         )
@@ -139,7 +153,7 @@ def create_mcp_call_tool(registry: MCPRegistry) -> AgentTool:
             "properties": {
                 "server": {
                     "type": "string",
-                    "enum": list(registry.servers),
+                    "enum": servers,
                 },
                 "tool": {"type": "string", "minLength": 1},
                 "arguments": {"type": "object"},

@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 from types import SimpleNamespace
 
 import geas.mcp
@@ -7,6 +8,8 @@ from geas.mcp import (
     MCPServerConfig,
     create_mcp_call_tool,
 )
+from geas.plan_agent.types import Plan, Task
+from geas.actions.publish_plan import publish_plan
 from mcp.types import TextContent
 
 
@@ -94,3 +97,67 @@ def test_mcp_connects_lazily_and_reuses_client(monkeypatch) -> None:
     assert FakeHTTPClient.instances[0].options["headers"] == {
         "Authorization": "Bearer secret",
     }
+
+
+def test_planwise_create_plan_payload_is_deterministic() -> None:
+    class FakeRegistry:
+        calls: list[tuple[str, str, dict[str, object]]] = []
+
+        async def call(
+            self,
+            server: str,
+            tool: str,
+            arguments: dict[str, object],
+        ) -> object:
+            self.calls.append((server, tool, arguments))
+            return SimpleNamespace(
+                content=[],
+                details={
+                    "plan_id": 123,
+                    "plan_title": "发布 Geas",
+                    "created_task_count": 1,
+                },
+            )
+
+    registry = FakeRegistry()
+    plan = Plan(
+        title="发布 Geas",
+        goal="完成 Agent",
+        description="实现并测试",
+        acceptance_criterion="测试通过",
+        constraints=["只使用 Python"],
+        tasks=[
+            Task(
+                title="实现 MCP",
+                level=1,
+                acceptance_criteria="端到端调用成功",
+                start_time=datetime.fromisoformat(
+                    "2026-08-01T09:00:00+01:00"
+                ),
+            )
+        ],
+    )
+
+    async def run() -> None:
+        for _ in range(2):
+            publication = await publish_plan(  # type: ignore[arg-type]
+                registry,
+                "same-session-id",
+                plan,
+            )
+            assert publication.plan_id == 123
+
+    asyncio.run(run())
+
+    first = registry.calls[0]
+    assert registry.calls == [first, first]
+    assert first[:2] == ("planwise", "create_plan")
+    payload = first[2]
+    assert payload["idempotency_key"] == "same-session-id"
+    remote_plan = payload["plan"]
+    assert isinstance(remote_plan, dict)
+    assert "acceptance_criterion" not in remote_plan
+    assert "constraints" not in remote_plan
+    tasks = remote_plan["tasks"]
+    assert isinstance(tasks, list)
+    assert tasks[0]["start_time"] == "2026-08-01T09:00:00+01:00"
