@@ -8,15 +8,21 @@ from prompt_toolkit import PromptSession
 from geas.ai.models import Models
 from geas.ai.providers import builtin_models
 from geas.ai.types import TextDeltaEvent
-from geas.config import load_model_selection, load_project_env
+from geas.config import (
+    load_mcp_servers,
+    load_model_selection,
+    load_project_env,
+)
 from geas.core.agent import Agent
 from geas.core.types import (
     AgentEvent,
     AgentState,
+    AgentTool,
     MessageUpdateEvent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
 )
+from geas.mcp import MCPRegistry, create_mcp_call_tool
 from geas.plan_agent.profiles import load_skill_profiles
 from geas.plan_agent.session import PlanSession
 from geas.plan_agent.session_manager import SessionManager
@@ -25,6 +31,7 @@ from geas.plan_agent.session_manager import SessionManager
 def _create_session(
     models: Models,
     skills_root: Path,
+    extra_tools: list[AgentTool],
 ) -> PlanSession:
     plan_selection = load_model_selection("PLAN")
     review_selection = load_model_selection("REVIEW")
@@ -62,6 +69,7 @@ def _create_session(
         skill_registry,
         base_profile,
         profiles,
+        extra_tools,
     )
 
 
@@ -83,11 +91,12 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-async def main() -> None:
-    args = _parse_args()
-    load_project_env()
-    models = builtin_models()
-    skills_root = Path.cwd() / "skills"
+async def _run(
+    args: argparse.Namespace,
+    models: Models,
+    skills_root: Path,
+    extra_tools: list[AgentTool],
+) -> None:
     manager = (
         SessionManager.open(args.session)
         if args.session
@@ -99,9 +108,13 @@ async def main() -> None:
     )
     if manager is None:
         manager = SessionManager.create()
-        session = _create_session(models, skills_root)
+        session = _create_session(models, skills_root, extra_tools)
     else:
-        session = manager.load(models, skills_root)
+        session = manager.load(
+            models,
+            skills_root,
+            extra_tools,
+        )
 
     plan_agent = session.plan_agent
     review_agent = session.review_agent
@@ -149,6 +162,26 @@ async def main() -> None:
         else:
             manager.save(session)
             print(f"\n[phase: {session.phase}]")
+
+
+async def main() -> None:
+    args = _parse_args()
+    load_project_env()
+    models = builtin_models()
+    servers = load_mcp_servers()
+
+    async with MCPRegistry(servers) as registry:
+        extra_tools = (
+            [create_mcp_call_tool(registry)]
+            if servers
+            else []
+        )
+        await _run(
+            args,
+            models,
+            Path.cwd() / "skills",
+            extra_tools,
+        )
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ from pydantic import TypeAdapter, ValidationError
 from geas.ai.models import Models
 from geas.ai.types import AssistantMessage, Message
 from geas.core.agent import Agent
-from geas.core.types import AgentState
+from geas.core.types import AgentState, AgentTool
 
 from .profiles import load_skill_profiles
 from .session import PlanSession
@@ -134,6 +134,7 @@ class SessionManager:
         self,
         models: Models,
         skills_root: Path | None = None,
+        extra_tools: list[AgentTool] | None = None,
     ) -> PlanSession:
         snapshot = _read_snapshot(self.session_file)
         _validate_snapshot(snapshot, self.session_id, self.cwd)
@@ -146,6 +147,7 @@ class SessionManager:
             _restore_agent(snapshot.plan_agent, models),
             _restore_agent(snapshot.review_agent, models),
             *profile_args,
+            extra_tools=extra_tools,
         )
         session.phase = snapshot.phase
         session.conversation = [*snapshot.conversation]

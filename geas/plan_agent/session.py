@@ -32,6 +32,7 @@ class PlanSession:
         skill_registry: SkillRegistry | None = None,
         base_profile: Profile = BASE_PROFILE,
         profiles: dict[Phase, Profile] | None = None,
+        extra_tools: list[AgentTool] | None = None,
     ) -> None:
         if plan_agent is review_agent:
             raise ValueError("Plan and review agents must be different")
@@ -54,6 +55,12 @@ class PlanSession:
             tool.name: tool
             for tool in create_plan_agent_tools(self)
         }
+        self._extra_tool_names: list[str] = []
+        for tool in extra_tools or []:
+            if tool.name in self._tools:
+                raise ValueError(f'Duplicate tool: "{tool.name}"')
+            self._tools[tool.name] = tool
+            self._extra_tool_names.append(tool.name)
         self.plan_agent.prepare_next_turn = (
             self._prepare_plan_next_turn
         )
@@ -109,6 +116,7 @@ class PlanSession:
     def tools_for(self, phase: Phase) -> list[AgentTool]:
         tool_names = [
             *self.base_profile.tools,
+            *self._extra_tool_names,
             *self.profiles[phase].tools,
         ]
         if self.skills_for(phase):
