@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 
 from geas.mcp import MCPServerConfig
 
@@ -36,6 +36,28 @@ def load_model_selection(phase: AgentPhaseName) -> ModelSelection:
         )
 
     return ModelSelection(provider=provider, model=model)
+
+
+def save_model_selection(
+    phase: AgentPhaseName,
+    selection: ModelSelection,
+) -> None:
+    _save_env(f"GEAS_{phase}_PROVIDER", selection.provider)
+    _save_env(f"GEAS_{phase}_MODEL", selection.model)
+
+
+def save_api_key(provider: str, api_key: str) -> None:
+    if not provider or not api_key:
+        raise ValueError("Provider and API key cannot be empty")
+    variable = f"{provider.upper().replace('-', '_')}_API_KEY"
+    _save_env(variable, api_key)
+
+
+def _save_env(name: str, value: str) -> None:
+    ENV_PATH.touch(exist_ok=True)
+    set_key(ENV_PATH, name, value)
+    ENV_PATH.chmod(0o600)
+    os.environ[name] = value
 
 
 def load_mcp_servers() -> dict[str, MCPServerConfig]:

@@ -288,3 +288,7 @@ def test_session_manager_restores_checkpoint(tmp_path) -> None:
     recent = SessionManager.continue_recent(cwd, root)
     assert recent is not None
     assert recent.session_id == manager.session_id
+    assert [
+        saved.session_id
+        for saved in SessionManager.list_saved(cwd, root)
+    ] == [manager.session_id]

@@ -107,6 +107,26 @@ class SessionManager:
         latest = max(files, key=lambda path: path.stat().st_mtime)
         return cls.open(latest.stem, resolved_cwd, root)
 
+    @classmethod
+    def list_saved(
+        cls,
+        cwd: Path | None = None,
+        root: Path | None = None,
+    ) -> list["SessionManager"]:
+        resolved_cwd = (cwd or Path.cwd()).resolve()
+        files = sorted(
+            _session_directory(resolved_cwd, root).glob("*.json"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        sessions: list[SessionManager] = []
+        for path in files:
+            try:
+                sessions.append(cls.open(path.stem, resolved_cwd, root))
+            except ValueError:
+                continue
+        return sessions
+
     def save(self, session: PlanSession) -> None:
         snapshot = SessionSnapshot(
             version=SESSION_VERSION,
