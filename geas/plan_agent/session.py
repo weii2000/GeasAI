@@ -12,7 +12,8 @@ from geas.core.types import (
     TurnEndEvent,
 )
 
-from .profiles import BASE_PROFILE, PHASE_PROFILES
+from .profiles import BASE_PROFILE, PHASE_PROFILES, Profile
+from .skills import Skill, SkillRegistry, format_skills_for_prompt
 from .tools import create_plan_agent_tools
 from .types import (
     ConversationMessage,
@@ -28,6 +29,9 @@ class PlanSession:
         self,
         plan_agent: Agent,
         review_agent: Agent,
+        skill_registry: SkillRegistry | None = None,
+        base_profile: Profile = BASE_PROFILE,
+        profiles: dict[Phase, Profile] | None = None,
     ) -> None:
         if plan_agent is review_agent:
             raise ValueError("Plan and review agents must be different")
@@ -38,13 +42,18 @@ class PlanSession:
         self.review_report: ReviewReport | None = None
         self.phase = Phase.PLAN
         self.conversation: list[ConversationMessage] = []
+        self.skill_registry = skill_registry or SkillRegistry()
+        self.base_profile = base_profile
+        self.profiles = (
+            profiles
+            if profiles is not None
+            else PHASE_PROFILES
+        )
 
         self._tools = {
             tool.name: tool
             for tool in create_plan_agent_tools(self)
         }
-        self.base_profile = BASE_PROFILE
-        self.profiles = PHASE_PROFILES
         self.plan_agent.prepare_next_turn = (
             self._prepare_plan_next_turn
         )
@@ -98,18 +107,31 @@ class PlanSession:
         self.phase = Phase.IDLE
 
     def tools_for(self, phase: Phase) -> list[AgentTool]:
-        tool_names = (
+        tool_names = [
             *self.base_profile.tools,
             *self.profiles[phase].tools,
-        )
+        ]
+        if self.skills_for(phase):
+            tool_names.extend(("read_skill", "bash"))
         return [
             self._tools[name]
             for name in tool_names
         ]
 
+    def skills_for(self, phase: Phase) -> list[Skill]:
+        names = dict.fromkeys(
+            (*self.base_profile.skills, *self.profiles[phase].skills)
+        )
+        skills: list[Skill] = []
+        for name in names:
+            skill = self.skill_registry.get(name)
+            if skill is None:
+                raise ValueError(f'Unknown skill in profile: "{name}"')
+            skills.append(skill)
+        return skills
+
     def build_system_prompt(self, profile_phase: Phase) -> str:
         profile = self.profiles[profile_phase]
-        skills = [*self.base_profile.skills, *profile.skills]
         sections = [
             self.base_profile.prompt,
             profile.prompt,
@@ -121,11 +143,11 @@ class PlanSession:
             ),
         ]
 
-        if skills:
-            sections.append(
-                "Available skills:\n"
-                + "\n".join(f"- {skill}" for skill in skills)
-            )
+        skills_prompt = format_skills_for_prompt(
+            self.skills_for(profile_phase)
+        )
+        if skills_prompt:
+            sections.append(skills_prompt)
 
         sections.append(
             "Current session state:\n"

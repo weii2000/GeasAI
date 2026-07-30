@@ -1,5 +1,7 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from pathlib import Path
 
+from .skills import SkillRegistry
 from .types import Phase
 
 
@@ -77,3 +79,33 @@ PHASE_PROFILES = {
         tools=("request_change",),
     ),
 }
+
+
+def load_skill_profiles(
+    root: Path,
+) -> tuple[SkillRegistry, Profile, dict[Phase, Profile]]:
+    registry = SkillRegistry()
+
+    def discover(group: str) -> tuple[str, ...]:
+        path = root / group
+        if not path.exists():
+            return ()
+        return tuple(
+            skill.name
+            for skill in registry.discover(path)
+        )
+
+    profiles = dict(PHASE_PROFILES)
+    profiles[Phase.PLAN] = replace(
+        profiles[Phase.PLAN],
+        skills=discover("plan"),
+    )
+    profiles[Phase.REVIEW] = replace(
+        profiles[Phase.REVIEW],
+        skills=discover("review"),
+    )
+    return (
+        registry,
+        replace(BASE_PROFILE, skills=discover("base")),
+        profiles,
+    )

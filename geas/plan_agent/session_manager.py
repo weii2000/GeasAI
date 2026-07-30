@@ -12,6 +12,7 @@ from geas.ai.types import AssistantMessage, Message
 from geas.core.agent import Agent
 from geas.core.types import AgentState
 
+from .profiles import load_skill_profiles
 from .session import PlanSession
 from .types import ConversationMessage, Phase, Plan, ReviewReport
 
@@ -129,12 +130,22 @@ class SessionManager:
         # editing is ever supported.
         temporary_file.replace(self.session_file)
 
-    def load(self, models: Models) -> PlanSession:
+    def load(
+        self,
+        models: Models,
+        skills_root: Path | None = None,
+    ) -> PlanSession:
         snapshot = _read_snapshot(self.session_file)
         _validate_snapshot(snapshot, self.session_id, self.cwd)
+        profile_args = (
+            load_skill_profiles(skills_root)
+            if skills_root is not None
+            else ()
+        )
         session = PlanSession(
             _restore_agent(snapshot.plan_agent, models),
             _restore_agent(snapshot.review_agent, models),
+            *profile_args,
         )
         session.phase = snapshot.phase
         session.conversation = [*snapshot.conversation]

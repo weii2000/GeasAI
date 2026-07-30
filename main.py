@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import json
+from pathlib import Path
 
 from prompt_toolkit import PromptSession
 
@@ -16,11 +17,15 @@ from geas.core.types import (
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
 )
+from geas.plan_agent.profiles import load_skill_profiles
 from geas.plan_agent.session import PlanSession
 from geas.plan_agent.session_manager import SessionManager
 
 
-def _create_session(models: Models) -> PlanSession:
+def _create_session(
+    models: Models,
+    skills_root: Path,
+) -> PlanSession:
     plan_selection = load_model_selection("PLAN")
     review_selection = load_model_selection("REVIEW")
     plan_model = models.get_model(
@@ -42,6 +47,9 @@ def _create_session(models: Models) -> PlanSession:
             f"{review_selection.provider}/{review_selection.model}"
         )
 
+    skill_registry, base_profile, profiles = load_skill_profiles(
+        skills_root
+    )
     return PlanSession(
         Agent(
             state=AgentState(model=plan_model),
@@ -51,6 +59,9 @@ def _create_session(models: Models) -> PlanSession:
             state=AgentState(model=review_model),
             stream_function=models.stream,
         ),
+        skill_registry,
+        base_profile,
+        profiles,
     )
 
 
@@ -76,6 +87,7 @@ async def main() -> None:
     args = _parse_args()
     load_project_env()
     models = builtin_models()
+    skills_root = Path.cwd() / "skills"
     manager = (
         SessionManager.open(args.session)
         if args.session
@@ -87,9 +99,9 @@ async def main() -> None:
     )
     if manager is None:
         manager = SessionManager.create()
-        session = _create_session(models)
+        session = _create_session(models, skills_root)
     else:
-        session = manager.load(models)
+        session = manager.load(models, skills_root)
 
     plan_agent = session.plan_agent
     review_agent = session.review_agent

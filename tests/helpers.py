@@ -18,6 +18,7 @@ from geas.ai.types import (
 from geas.core.agent import Agent
 from geas.core.types import AgentState
 from geas.plan_agent.session import PlanSession
+from geas.plan_agent.skills import SkillRegistry
 
 
 class ScriptedModel:
@@ -51,6 +52,7 @@ class ScriptedModel:
 def make_session(
     plan_responses: list[AssistantMessage],
     review_responses: list[AssistantMessage] | None = None,
+    skill_registry: SkillRegistry | None = None,
 ) -> tuple[PlanSession, ScriptedModel, ScriptedModel]:
     plan_model = ScriptedModel(plan_responses)
     review_model = ScriptedModel(review_responses or [])
@@ -69,7 +71,7 @@ def make_session(
         stream_function=review_model,
     )
     return (
-        PlanSession(plan_agent, review_agent),
+        PlanSession(plan_agent, review_agent, skill_registry),
         plan_model,
         review_model,
     )

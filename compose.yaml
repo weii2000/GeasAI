@@ -1,0 +1,13 @@
+services:
+  geas:
+    build: .
+    image: geas:dev
+    env_file: .env
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./skills:/app/skills:ro
+      - geas-data:/root/.geas
+
+volumes:
+  geas-data:
