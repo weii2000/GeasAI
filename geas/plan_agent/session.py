@@ -2,12 +2,25 @@ import json
 from dataclasses import asdict
 from datetime import datetime
 
+from geas.ai.types import AssistantMessage, TextContent
 from geas.core.agent import Agent
-from geas.core.types import AgentContext, AgentTool, TurnEndEvent
+from geas.core.types import (
+    AgentContext,
+    AgentEvent,
+    AgentTool,
+    MessageEndEvent,
+    TurnEndEvent,
+)
 
 from .profiles import BASE_PROFILE, PHASE_PROFILES
 from .tools import create_plan_agent_tools
-from .types import IssueSeverity, Phase, Plan, ReviewReport
+from .types import (
+    ConversationMessage,
+    IssueSeverity,
+    Phase,
+    Plan,
+    ReviewReport,
+)
 
 
 class PlanSession:
@@ -24,6 +37,7 @@ class PlanSession:
         self.plan = Plan()
         self.review_report: ReviewReport | None = None
         self.phase = Phase.PLAN
+        self.conversation: list[ConversationMessage] = []
 
         self._tools = {
             tool.name: tool
@@ -42,6 +56,18 @@ class PlanSession:
         )
         self.review_agent.should_stop_after_turn = (
             self._stop_review_after_turn
+        )
+        self.plan_agent.subscribe(
+            lambda event: self._record_assistant_text(
+                event,
+                Phase.PLAN,
+            )
+        )
+        self.review_agent.subscribe(
+            lambda event: self._record_assistant_text(
+                event,
+                Phase.REVIEW,
+            )
         )
         self._sync_agent(self.plan_agent, Phase.PLAN)
         self._sync_agent(self.review_agent, Phase.REVIEW)
@@ -112,6 +138,11 @@ class PlanSession:
                         if self.review_report is not None
                         else None
                     ),
+                    "conversation": [
+                        asdict(message)
+                        for message in self.conversation
+                        if message.phase is not profile_phase
+                    ],
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -165,6 +196,16 @@ class PlanSession:
         return self.phase is not Phase.REVIEW
 
     async def prompt(self, text: str) -> None:
+        if self.phase is Phase.IDLE:
+            return
+
+        self.conversation.append(
+            ConversationMessage(
+                role="user",
+                content=text,
+                phase=self.phase,
+            )
+        )
         next_prompt = text
 
         while self.phase is not Phase.IDLE:
@@ -181,6 +222,31 @@ class PlanSession:
                 break
 
             next_prompt = "请根据当前阶段和 Current session state 继续。"
+
+    def _record_assistant_text(
+        self,
+        event: AgentEvent,
+        phase: Phase,
+    ) -> None:
+        if (
+            not isinstance(event, MessageEndEvent)
+            or not isinstance(event.message, AssistantMessage)
+        ):
+            return
+
+        text = "\n".join(
+            block.text
+            for block in event.message.content
+            if isinstance(block, TextContent)
+        )
+        if text:
+            self.conversation.append(
+                ConversationMessage(
+                    role="assistant",
+                    content=text,
+                    phase=phase,
+                )
+            )
 
     def _sync_agent(self, agent: Agent, phase: Phase) -> None:
         agent.state.system_prompt = self.build_system_prompt(phase)

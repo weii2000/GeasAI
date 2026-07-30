@@ -2,6 +2,7 @@ import asyncio
 
 import pytest
 
+from geas.ai.models import Models
 from geas.ai.types import (
     AssistantMessage,
     TextContent,
@@ -9,9 +10,11 @@ from geas.ai.types import (
     ToolResultMessage,
     UserMessage,
 )
+from geas.plan_agent.session_manager import SessionManager
 from geas.plan_agent.types import (
     IssueSeverity,
     Phase,
+    Plan,
     ReviewIssue,
     ReviewReport,
     Task,
@@ -23,6 +26,15 @@ from .helpers import make_assistant, make_session, make_tool_call
 def test_plan_session_runs_plan_review_to_idle() -> None:
     session, plan_model, review_model = make_session(
         plan_responses=[
+            make_assistant(
+                [
+                    TextContent(
+                        type="text",
+                        text="你每天可以投入多少时间？",
+                    )
+                ],
+                "stop",
+            ),
             make_assistant(
                 [
                     ThinkingContent(
@@ -71,6 +83,8 @@ def test_plan_session_runs_plan_review_to_idle() -> None:
     )
 
     asyncio.run(session.prompt("帮我规划 Geas"))
+    assert session.phase is Phase.PLAN
+    asyncio.run(session.prompt("每天两个小时"))
 
     assert session.phase is Phase.IDLE
     assert session.plan.goal == "发布 Geas"
@@ -78,7 +92,7 @@ def test_plan_session_runs_plan_review_to_idle() -> None:
     assert session.review_report == ReviewReport(
         summary="计划可以执行",
     )
-    assert len(plan_model.contexts) == 1
+    assert len(plan_model.contexts) == 2
     assert len(review_model.contexts) == 1
     plan_prompt = plan_model.contexts[0].system_prompt
     review_prompt = review_model.contexts[0].system_prompt
@@ -86,6 +100,18 @@ def test_plan_session_runs_plan_review_to_idle() -> None:
     assert review_prompt is not None
     assert "PLAN 阶段" in plan_prompt
     assert "REVIEW 阶段" in review_prompt
+    assert "帮我规划 Geas" in review_prompt
+    assert "你每天可以投入多少时间？" in review_prompt
+    assert "每天两个小时" in review_prompt
+    assert "先制定计划" not in review_prompt
+    assert [
+        message.content
+        for message in session.conversation
+    ] == [
+        "帮我规划 Geas",
+        "你每天可以投入多少时间？",
+        "每天两个小时",
+    ]
     assert plan_model.models[0].provider == "deepseek"
     assert review_model.models[0].provider == "review-test"
     assert all(
@@ -210,3 +236,55 @@ def test_task_tree_rejects_skipped_levels() -> None:
                 Task(title="错误的三级任务", level=3),
             ],
         )
+
+
+def test_session_manager_restores_checkpoint(tmp_path) -> None:
+    session, plan_model, _review_model = make_session([])
+    session.phase = Phase.REVIEW
+    session.plan = Plan(
+        goal="发布 Geas",
+        constraints=["仅使用 Python"],
+        tasks=[Task(title="实现持久化", level=1)],
+    )
+    session.review_report = ReviewReport(summary="等待评审")
+    session.plan_agent.state.messages = [
+        UserMessage(
+            role="user",
+            content="保存这个计划",
+            timestamp=1,
+        ),
+        make_assistant(
+            [TextContent(type="text", text="计划已保存")],
+            "stop",
+        ),
+    ]
+
+    models = Models()
+    models.register_models([
+        session.plan_agent.state.model,
+        session.review_agent.state.model,
+    ])
+    models.register_api(session.plan_agent.state.model.api, plan_model)
+
+    root = tmp_path / "sessions"
+    cwd = tmp_path / "project"
+    manager = SessionManager.create(cwd, root)
+    manager.save(session)
+
+    restored = SessionManager.open(
+        manager.session_id,
+        cwd,
+        root,
+    ).load(models)
+
+    assert restored.phase is Phase.REVIEW
+    assert restored.plan == session.plan
+    assert restored.review_report == session.review_report
+    assert restored.conversation == session.conversation
+    assert (
+        restored.plan_agent.state.messages
+        == session.plan_agent.state.messages
+    )
+    recent = SessionManager.continue_recent(cwd, root)
+    assert recent is not None
+    assert recent.session_id == manager.session_id

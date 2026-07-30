@@ -11,6 +11,13 @@ class Phase(StrEnum):
     IDLE = auto()
 
 
+@dataclass
+class ConversationMessage:
+    role: Literal["user", "assistant"]
+    content: str
+    phase: Phase
+
+
 type TaskLevel = Literal[1, 2, 3]
 
 

@@ -1,8 +1,10 @@
+import argparse
 import asyncio
 import json
 
 from prompt_toolkit import PromptSession
 
+from geas.ai.models import Models
 from geas.ai.providers import builtin_models
 from geas.ai.types import TextDeltaEvent
 from geas.config import load_model_selection, load_project_env
@@ -15,12 +17,10 @@ from geas.core.types import (
     ToolExecutionStartEvent,
 )
 from geas.plan_agent.session import PlanSession
+from geas.plan_agent.session_manager import SessionManager
 
 
-async def main() -> None:
-    load_project_env()
-    models = builtin_models()
-
+def _create_session(models: Models) -> PlanSession:
     plan_selection = load_model_selection("PLAN")
     review_selection = load_model_selection("REVIEW")
     plan_model = models.get_model(
@@ -42,15 +42,57 @@ async def main() -> None:
             f"{review_selection.provider}/{review_selection.model}"
         )
 
-    plan_agent = Agent(
-        state=AgentState(model=plan_model),
-        stream_function=models.stream,
+    return PlanSession(
+        Agent(
+            state=AgentState(model=plan_model),
+            stream_function=models.stream,
+        ),
+        Agent(
+            state=AgentState(model=review_model),
+            stream_function=models.stream,
+        ),
     )
-    review_agent = Agent(
-        state=AgentState(model=review_model),
-        stream_function=models.stream,
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "-c",
+        "--continue",
+        dest="continue_session",
+        action="store_true",
+        help="resume the most recently saved session",
     )
-    session = PlanSession(plan_agent, review_agent)
+    group.add_argument(
+        "--session",
+        metavar="ID",
+        help="resume a saved session by ID",
+    )
+    return parser.parse_args()
+
+
+async def main() -> None:
+    args = _parse_args()
+    load_project_env()
+    models = builtin_models()
+    manager = (
+        SessionManager.open(args.session)
+        if args.session
+        else (
+            SessionManager.continue_recent()
+            if args.continue_session
+            else None
+        )
+    )
+    if manager is None:
+        manager = SessionManager.create()
+        session = _create_session(models)
+    else:
+        session = manager.load(models)
+
+    plan_agent = session.plan_agent
+    review_agent = session.review_agent
 
     def print_stream(event: AgentEvent) -> None:
         if isinstance(event, MessageUpdateEvent):
@@ -68,7 +110,10 @@ async def main() -> None:
     plan_agent.subscribe(print_stream)
     review_agent.subscribe(print_stream)
     console = PromptSession[str]()
-    print("Geas Plan Agent（输入 /quit 退出）")
+    print(
+        "Geas Plan Agent（输入 /quit 退出）"
+        f"\nSession: {manager.session_id}"
+    )
 
     while True:
         try:
@@ -90,6 +135,7 @@ async def main() -> None:
         except Exception as error:
             print(f"\n[error] {error}")
         else:
+            manager.save(session)
             print(f"\n[phase: {session.phase}]")
 
 
