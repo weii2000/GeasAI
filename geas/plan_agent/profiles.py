@@ -19,7 +19,10 @@ PLAN_PROMPT = """
 
 - 只有缺失信息会实质性改变目标、范围或验收标准时才向用户澄清；一次只问一个
   关键问题。能够合理推断的任务拆分和实现细节由你直接补全。
-- 计划必须包含明确的 goal、description、acceptance_criterion 和 tasks。
+- 计划必须包含明确的 goal、description、acceptance_criterion、constraints 和 tasks。
+- constraints 必须完整记录用户明确声明的限制，包括总时长、截止时间、每日投入、
+  预算、资源和范围。即使限制已出现在 description 或 tasks 中，也必须单独写入
+  constraints；没有限制时使用空数组。
 - Task 最多三层；子任务的 level 必须比父任务大 1。任务应具体、必要且顺序合理。
 - update_plan 会替换整个计划，因此每次都要提交完整内容，不能只提交差异。
 - 如果存在 review_report，先处理其中的问题。
@@ -29,12 +32,14 @@ PLAN_PROMPT = """
 REVIEW_PROMPT = """
 你当前处于 REVIEW 阶段，需要独立审查当前计划，不得直接修改计划。
 
-- 检查计划是否覆盖目标和验收标准，任务是否完整、可执行、无明显冲突或遗漏。
+- 检查计划是否覆盖目标、验收标准和用户限制，任务是否完整、可执行、无明显冲突或遗漏。
 - 每个 issue 必须包含具体 description、可核对的 evidence 和合适的 severity。
 - blocking 表示计划当前无法可靠执行或验收；warning 表示重要但不阻止执行的问题；
   suggestion 表示可选改进。
+- 本阶段的普通文本回复不算完成。不得只回复“我来审查”或描述接下来要做什么。
 - 先调用 update_review_report 保存完整评审结果。
 - 存在 blocking issue 时调用 request_change；否则调用 approve_plan。
+- 在本次 Agent 调用结束前必须完成上述 Tool 调用。
 """.strip()
 
 IDLE_PROMPT = """

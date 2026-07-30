@@ -1,0 +1,193 @@
+{
+  "name": "geas-single-phase",
+  "version": "0.2",
+  "cases": [
+    {
+      "case_id": "plan_ambiguous_goal_clarifies",
+      "description": "模糊目标应只追问一个关键问题。",
+      "target": "plan",
+      "input": {
+        "prompt": "我想学 Python，帮我做个计划。"
+      },
+      "expected": {
+        "phase": "plan",
+        "require_plan_unchanged": true,
+        "min_question_count": 1,
+        "max_question_count": 3
+      }
+    },
+    {
+      "case_id": "plan_complete_goal_submits",
+      "description": "信息完整时应直接生成计划并提交评审。",
+      "target": "plan",
+      "input": {
+        "prompt": "请制定一个四周学习计划，目标是独立完成一个使用 FastAPI、SQLAlchemy 和 pytest 的任务管理 API。每天最多投入 1 小时。完成标准是能够注册登录、创建项目和任务，并且核心接口有自动化测试。请直接给出可执行计划。"
+      },
+      "expected": {
+        "phase": "review",
+        "require_complete_plan": true,
+        "min_task_count": 4,
+        "max_task_count": 40,
+        "min_top_level_task_count": 4,
+        "max_top_level_task_count": 8,
+        "required_constraint_terms": [
+          ["四周", "4周"],
+          ["每天", "每日", "每个工作日"],
+          ["最多", "不超过", "至多"],
+          ["1小时", "一小时", "一个小时"]
+        ]
+      }
+    },
+    {
+      "case_id": "plan_fixes_blocking_review",
+      "description": "重新规划时应处理上一轮评审指出的不可验收问题。",
+      "target": "plan",
+      "input": {
+        "prompt": "请根据评审报告修改计划，并在修复问题后重新提交。",
+        "plan": {
+          "goal": "两周内完成带 JWT 登录和任务 CRUD 的 FastAPI API",
+          "description": "实现一个后端作品集项目。",
+          "acceptance_criterion": "核心接口测试全部通过",
+          "constraints": ["两周内完成"],
+          "tasks": [
+            {
+              "title": "实现用户认证",
+              "level": 1
+            },
+            {
+              "title": "实现任务 CRUD",
+              "level": 1
+            }
+          ]
+        },
+        "review_report": {
+          "summary": "任务缺少可验证的测试工作。",
+          "issues": [
+            {
+              "description": "计划没有安排自动化测试。",
+              "evidence": "现有任务只有认证和 CRUD 实现。",
+              "severity": "blocking"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "phase": "review",
+        "require_complete_plan": true,
+        "min_task_count": 3,
+        "max_task_count": 20,
+        "required_plan_terms": [
+          ["测试", "pytest"],
+          ["JWT", "登录", "认证"]
+        ]
+      }
+    },
+    {
+      "case_id": "review_approves_complete_plan",
+      "description": "完整且可验收的计划应通过评审。",
+      "target": "review",
+      "input": {
+        "prompt": "请独立审查当前计划。",
+        "plan": {
+          "goal": "完成可部署的 FastAPI 任务管理 API",
+          "description": "实现 JWT 认证、项目与任务 CRUD、用户数据隔离、测试和部署文档。",
+          "acceptance_criterion": "应用可按 README 启动，认证、CRUD 和越权访问测试全部通过。",
+          "constraints": [],
+          "tasks": [
+            {
+              "title": "设计数据库模型和 API 契约",
+              "level": 1
+            },
+            {
+              "title": "实现 JWT 注册登录",
+              "level": 1
+            },
+            {
+              "title": "实现项目与任务 CRUD 及用户数据隔离",
+              "level": 1
+            },
+            {
+              "title": "编写成功、非法输入和越权访问测试",
+              "level": 1
+            },
+            {
+              "title": "补充启动和部署文档",
+              "level": 1
+            }
+          ]
+        }
+      },
+      "expected": {
+        "phase": "idle",
+        "require_complete_review_report": true
+      }
+    },
+    {
+      "case_id": "review_blocks_missing_acceptance",
+      "description": "缺少验收标准的计划应被退回修改。",
+      "target": "review",
+      "input": {
+        "prompt": "请独立审查当前计划。",
+        "plan": {
+          "goal": "完成 FastAPI 任务管理 API",
+          "description": "实现登录和任务管理。",
+          "acceptance_criterion": "",
+          "constraints": [],
+          "tasks": [
+            {
+              "title": "写登录功能",
+              "level": 1
+            },
+            {
+              "title": "写任务功能",
+              "level": 1
+            }
+          ]
+        }
+      },
+      "expected": {
+        "phase": "plan",
+        "require_complete_review_report": true,
+        "min_issue_count": 1,
+        "minimum_issue_severity": "blocking",
+        "required_issue_terms": [
+          ["验收", "完成标准", "验证"]
+        ]
+      }
+    },
+    {
+      "case_id": "review_blocks_constraint_violation",
+      "description": "任务明显违反用户时间限制时应退回修改。",
+      "target": "review",
+      "input": {
+        "prompt": "请独立审查当前计划。",
+        "plan": {
+          "goal": "两周内完成 FastAPI 任务管理 API",
+          "description": "实现认证、任务 CRUD 和自动化测试。",
+          "acceptance_criterion": "核心接口测试全部通过。",
+          "constraints": ["每天最多投入 1 小时"],
+          "tasks": [
+            {
+              "title": "第一周每天完成 3 小时的认证和数据库开发",
+              "level": 1
+            },
+            {
+              "title": "第二周每天完成 3 小时的 CRUD 和测试开发",
+              "level": 1
+            }
+          ]
+        }
+      },
+      "expected": {
+        "phase": "plan",
+        "require_complete_review_report": true,
+        "min_issue_count": 1,
+        "minimum_issue_severity": "blocking",
+        "required_issue_terms": [
+          ["1小时", "一小时", "时间限制", "时间约束"],
+          ["冲突", "超过", "超出", "违反", "不满足"]
+        ]
+      }
+    }
+  ]
+}

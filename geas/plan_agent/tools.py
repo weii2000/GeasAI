@@ -46,6 +46,13 @@ _UPDATE_PLAN_PARAMETERS: dict[str, object] = {
         "goal": {"type": "string"},
         "description": {"type": "string"},
         "acceptance_criterion": {"type": "string"},
+        "constraints": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "Explicit user constraints; use an empty array when none."
+            ),
+        },
         "tasks": {
             "type": "array",
             "items": {"$ref": "#/$defs/task"},
@@ -55,6 +62,7 @@ _UPDATE_PLAN_PARAMETERS: dict[str, object] = {
         "goal",
         "description",
         "acceptance_criterion",
+        "constraints",
         "tasks",
     ],
     "additionalProperties": False,
@@ -135,6 +143,10 @@ def create_plan_agent_tools(session: PlanSession) -> list[AgentTool]:
                 goal=str(args["goal"]),
                 description=str(args["description"]),
                 acceptance_criterion=str(args["acceptance_criterion"]),
+                constraints=[
+                    str(constraint)
+                    for constraint in args["constraints"]  # type: ignore[union-attr]
+                ],
                 tasks=[
                     _task_from_dict(task)
                     for task in args["tasks"]  # type: ignore[union-attr]

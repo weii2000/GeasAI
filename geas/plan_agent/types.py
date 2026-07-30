@@ -54,6 +54,7 @@ class Plan:
     goal: str = ""
     description: str = ""
     acceptance_criterion: str = ""
+    constraints: list[str] = field(default_factory=list)
     tasks: list[Task] = field(default_factory=list)
 
     def __post_init__(self) -> None:

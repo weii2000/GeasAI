@@ -1,4 +1,4 @@
-from .types import Model, ModelCost
+from ..types import Model, ModelCost
 
 
 QWEN_MODELS = [

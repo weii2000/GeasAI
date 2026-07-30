@@ -180,11 +180,7 @@ class PlanSession:
             if self.phase is starting_phase or self.phase is Phase.IDLE:
                 break
 
-            next_prompt = (
-                "请独立审查 Current session state 中已提交的计划。"
-                if self.phase is Phase.REVIEW
-                else "请根据 Current session state 中的评审报告修改计划。"
-            )
+            next_prompt = "请根据当前阶段和 Current session state 继续。"
 
     def _sync_agent(self, agent: Agent, phase: Phase) -> None:
         agent.state.system_prompt = self.build_system_prompt(phase)
