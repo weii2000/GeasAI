@@ -17,7 +17,11 @@ from geas.ai.types import (
 )
 from geas.core.agent import Agent
 from geas.core.types import AgentState
-from geas.plan_agent.session import PlanSession
+from geas.plan_agent.session import (
+    PLAN_AGENT_MAX_TURNS,
+    REVIEW_AGENT_MAX_TURNS,
+    PlanSession,
+)
 from geas.plan_agent.skills import SkillRegistry
 
 
@@ -59,6 +63,7 @@ def make_session(
     plan_agent = Agent(
         state=AgentState(model=DEEPSEEK_MODELS[0]),
         stream_function=plan_model,
+        max_turns=PLAN_AGENT_MAX_TURNS,
     )
     review_agent = Agent(
         state=AgentState(
@@ -69,6 +74,7 @@ def make_session(
             )
         ),
         stream_function=review_model,
+        max_turns=REVIEW_AGENT_MAX_TURNS,
     )
     return (
         PlanSession(plan_agent, review_agent, skill_registry),

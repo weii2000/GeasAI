@@ -20,6 +20,8 @@ class ModelSelection:
 
 
 def load_project_env() -> None:
+    if ENV_PATH.exists():
+        ENV_PATH.chmod(0o600)
     load_dotenv(ENV_PATH)
 
 

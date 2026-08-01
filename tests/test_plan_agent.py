@@ -203,6 +203,21 @@ def test_invalid_tool_arguments_do_not_update_plan() -> None:
     )
 
 
+def test_agent_stops_after_max_turns() -> None:
+    session, _plan_model, _review_model = make_session(
+        plan_responses=[
+            make_assistant(
+                [make_tool_call("read_plan", {})],
+                "toolUse",
+            ),
+        ],
+    )
+    session.plan_agent.max_turns = 1
+
+    with pytest.raises(RuntimeError, match="exceeded max turns: 1"):
+        asyncio.run(session.plan_agent.prompt("继续调用工具"))
+
+
 def test_blocking_review_cannot_be_approved() -> None:
     session, _plan_model, _review_model = make_session([])
     session.submit_plan()
@@ -354,6 +369,9 @@ def test_session_manager_restores_checkpoint(tmp_path) -> None:
     cwd = tmp_path / "project"
     manager = SessionManager.create(cwd, root)
     manager.save(session)
+
+    assert manager.session_file.parent.stat().st_mode & 0o777 == 0o700
+    assert manager.session_file.stat().st_mode & 0o777 == 0o600
 
     restored = SessionManager.open(
         manager.session_id,

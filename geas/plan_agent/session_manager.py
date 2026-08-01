@@ -13,7 +13,11 @@ from geas.core.agent import Agent
 from geas.core.types import AgentState, AgentTool
 
 from .profiles import load_skill_profiles
-from .session import PlanSession
+from .session import (
+    PLAN_AGENT_MAX_TURNS,
+    REVIEW_AGENT_MAX_TURNS,
+    PlanSession,
+)
 from .types import ConversationMessage, Phase, Plan, ReviewReport
 
 
@@ -142,10 +146,12 @@ class SessionManager:
             review_agent=_agent_snapshot(session.review_agent),
         )
         self.session_file.parent.mkdir(parents=True, exist_ok=True)
+        self.session_file.parent.chmod(0o700)
         temporary_file = self.session_file.with_suffix(".tmp")
         temporary_file.write_bytes(
             _SNAPSHOT.dump_json(snapshot, indent=2)
         )
+        temporary_file.chmod(0o600)
         # ponytail: one writer per session; add file locking if concurrent
         # editing is ever supported.
         temporary_file.replace(self.session_file)
@@ -164,8 +170,16 @@ class SessionManager:
             else ()
         )
         session = PlanSession(
-            _restore_agent(snapshot.plan_agent, models),
-            _restore_agent(snapshot.review_agent, models),
+            _restore_agent(
+                snapshot.plan_agent,
+                models,
+                PLAN_AGENT_MAX_TURNS,
+            ),
+            _restore_agent(
+                snapshot.review_agent,
+                models,
+                REVIEW_AGENT_MAX_TURNS,
+            ),
             *profile_args,
             extra_tools=extra_tools,
         )
@@ -179,7 +193,10 @@ class SessionManager:
 def _session_directory(cwd: Path, root: Path | None) -> Path:
     sessions_root = root or Path.home() / ".geas" / "sessions"
     digest = hashlib.sha256(str(cwd).encode()).hexdigest()[:8]
-    return sessions_root / f"{cwd.name}-{digest}"
+    directory = sessions_root / f"{cwd.name}-{digest}"
+    if directory.exists():
+        directory.chmod(0o700)
+    return directory
 
 
 def _now() -> str:
@@ -196,6 +213,7 @@ def _validate_session_id(session_id: str) -> None:
 
 def _read_snapshot(path: Path) -> SessionSnapshot:
     try:
+        path.chmod(0o600)
         return _SNAPSHOT.validate_json(path.read_bytes())
     except (OSError, ValidationError) as error:
         raise ValueError(f"Cannot read session: {path}") from error
@@ -227,7 +245,11 @@ def _agent_snapshot(agent: Agent) -> AgentSnapshot:
     )
 
 
-def _restore_agent(snapshot: AgentSnapshot, models: Models) -> Agent:
+def _restore_agent(
+    snapshot: AgentSnapshot,
+    models: Models,
+    max_turns: int,
+) -> Agent:
     model = models.get_model(snapshot.provider, snapshot.model)
     if model is None:
         raise ValueError(
@@ -239,4 +261,5 @@ def _restore_agent(snapshot: AgentSnapshot, models: Models) -> Agent:
             messages=[*snapshot.messages],
         ),
         stream_function=models.stream,
+        max_turns=max_turns,
     )

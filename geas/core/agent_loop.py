@@ -38,6 +38,7 @@ def agent_loop(
     context: AgentContext,
     config: AgentLoopConfig,
     stream_function: StreamFunction,
+    max_turns: int,
 ) -> AgentEventStream:
     output = AgentEventStream()
     task = asyncio.create_task(
@@ -47,6 +48,7 @@ def agent_loop(
             context,
             config,
             stream_function,
+            max_turns,
         )
     )
     output.set_producer_task(task)
@@ -59,6 +61,7 @@ async def _run_agent_loop_safely(
     context: AgentContext,
     config: AgentLoopConfig,
     stream_function: StreamFunction,
+    max_turns: int,
 ) -> None:
     try:
         await _run_agent_loop(
@@ -67,6 +70,7 @@ async def _run_agent_loop_safely(
             context,
             config,
             stream_function,
+            max_turns,
         )
     except Exception as error:
         output.fail(error)
@@ -157,6 +161,7 @@ async def _run_agent_loop(
     context: AgentContext,
     config: AgentLoopConfig,
     stream_function: StreamFunction,
+    max_turns: int,
 ) -> None:
     output.push(AgentStartEvent(type="agent_start"))
     output.push(TurnStartEvent(type="turn_start"))
@@ -170,8 +175,15 @@ async def _run_agent_loop(
     current_messages = [*context.messages, *prompts]
     new_messages = [*prompts]
     first_turn = True
+    turn_count = 0
 
     while True:
+        if turn_count >= max_turns:
+            raise RuntimeError(
+                f"Agent exceeded max turns: {max_turns}"
+            )
+        turn_count += 1
+
         if first_turn:
             first_turn = False
         else:

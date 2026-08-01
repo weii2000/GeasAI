@@ -28,11 +28,16 @@ class Agent:
         self,
         state: AgentState,
         stream_function: StreamFunction,
+        max_turns: int,
         prepare_next_turn: PrepareNextTurn | None = None,
         should_stop_after_turn: ShouldStopAfterTurn | None = None,
     ) -> None:
+        if max_turns < 1:
+            raise ValueError("max_turns must be at least 1")
+
         self.state = state
         self._stream_function = stream_function
+        self.max_turns = max_turns
         self.prepare_next_turn = prepare_next_turn
         self.should_stop_after_turn = should_stop_after_turn
         self._listeners: set[AgentListener] = set()
@@ -72,6 +77,7 @@ class Agent:
                     should_stop_after_turn=self.should_stop_after_turn,
                 ),
                 stream_function=self._stream_function,
+                max_turns=self.max_turns,
             )
 
             async for event in stream:

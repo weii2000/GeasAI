@@ -26,6 +26,9 @@ from .types import (
 
 type OnPlanApproved = Callable[[Plan], Awaitable[None]]
 
+PLAN_AGENT_MAX_TURNS = 20
+REVIEW_AGENT_MAX_TURNS = 10
+
 
 class PlanSession:
     def __init__(

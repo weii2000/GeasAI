@@ -34,7 +34,11 @@ from geas.core.types import (
 )
 from geas.mcp import MCPRegistry, create_mcp_call_tool
 from geas.plan_agent.profiles import load_skill_profiles
-from geas.plan_agent.session import PlanSession
+from geas.plan_agent.session import (
+    PLAN_AGENT_MAX_TURNS,
+    REVIEW_AGENT_MAX_TURNS,
+    PlanSession,
+)
 from geas.plan_agent.session_manager import SessionManager
 from geas.plan_agent.types import Phase, Plan
 from geas.actions.publish_plan import (
@@ -235,10 +239,12 @@ class RPCServer:
                 Agent(
                     state=AgentState(model=plan_model),
                     stream_function=self.models.stream,
+                    max_turns=PLAN_AGENT_MAX_TURNS,
                 ),
                 Agent(
                     state=AgentState(model=review_model),
                     stream_function=self.models.stream,
+                    max_turns=REVIEW_AGENT_MAX_TURNS,
                 ),
                 skill_registry,
                 base_profile,

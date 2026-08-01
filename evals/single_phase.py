@@ -20,7 +20,11 @@ from geas.config import (
 )
 from geas.core.agent import Agent
 from geas.core.types import AgentState
-from geas.plan_agent.session import PlanSession
+from geas.plan_agent.session import (
+    PLAN_AGENT_MAX_TURNS,
+    REVIEW_AGENT_MAX_TURNS,
+    PlanSession,
+)
 from geas.plan_agent.types import (
     IssueSeverity,
     Phase,
@@ -253,8 +257,16 @@ def _term_groups(value: object) -> list[list[str]]:
 def _new_session(model: Model) -> PlanSession:
     models = builtin_models()
     return PlanSession(
-        Agent(AgentState(model=model), models.stream),
-        Agent(AgentState(model=model), models.stream),
+        Agent(
+            state=AgentState(model=model),
+            stream_function=models.stream,
+            max_turns=PLAN_AGENT_MAX_TURNS,
+        ),
+        Agent(
+            state=AgentState(model=model),
+            stream_function=models.stream,
+            max_turns=REVIEW_AGENT_MAX_TURNS,
+        ),
     )
 
 
