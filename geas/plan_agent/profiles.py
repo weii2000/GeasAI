@@ -17,7 +17,7 @@ BASE_PROMPT = """
 """.strip()
 
 PLAN_PROMPT = """
-你当前处于 PLAN 阶段，需要通过对话形成完整、可执行的计划。
+你当前处于 PLAN 阶段，需要通过对话收集信息，形成完整、可执行的计划。
 
 - 只有缺失信息会实质性改变目标、范围或验收标准时才向用户澄清；一次只问一个
   关键问题。能够合理推断的任务拆分和实现细节由你直接补全。
@@ -31,7 +31,8 @@ PLAN_PROMPT = """
   start_time 和 due_time，否则使用 null。
 - update_plan 会替换整个计划，因此每次都要提交完整内容，不能只提交差异。
 - 如果存在 review_report，先处理其中的问题。
-- 计划足以评审时，调用 update_plan，然后调用 submit_plan。
+- 计划足以评审时，如果 session.plan 尚未与最新讨论同步，
+  调用 update_plan，然后调用 submit_plan。
 """.strip()
 
 REVIEW_PROMPT = """
@@ -44,7 +45,9 @@ REVIEW_PROMPT = """
   suggestion 表示可选改进。
 - 本阶段的普通文本回复不算完成。不得只回复“我来审查”或描述接下来要做什么。
 - 先调用 update_review_report 保存完整评审结果。
-- 存在 blocking issue 时调用 request_change；否则调用 approve_plan。
+- 如果当前输入是用户对待确认计划提出的意见，必须将意见整理进 review_report，
+  然后调用 request_change，不能再次批准。
+- 存在 blocking issue 时调用 request_change；否则调用 approve_plan 请求用户最终确认。
 - 在本次 Agent 调用结束前必须完成上述 Tool 调用。
 """.strip()
 

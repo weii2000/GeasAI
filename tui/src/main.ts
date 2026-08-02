@@ -25,7 +25,7 @@ import {
   type SelectListTheme,
 } from "@earendil-works/pi-tui";
 
-type Phase = "PLAN" | "REVIEW" | "IDLE";
+type Phase = "PLAN" | "REVIEW" | "PENDING_APPROVAL" | "IDLE";
 type AgentPhase = "PLAN" | "REVIEW";
 
 type ModelRef = {
@@ -45,11 +45,30 @@ type ConversationMessage = {
   phase: Phase;
 };
 
+type PlanTask = {
+  title: string;
+  status: "pending" | "in_progress" | "completed";
+  acceptance_criteria: string | null;
+  start_time: string | null;
+  due_time: string | null;
+  subtasks: PlanTask[];
+};
+
+type PlanData = {
+  title: string;
+  goal: string;
+  description: string;
+  acceptance_criterion: string;
+  constraints: string[];
+  tasks: PlanTask[];
+};
+
 type SessionState = {
   session_id: string;
   cwd: string;
   phase: Phase | null;
   conversation: ConversationMessage[];
+  plan: PlanData | null;
   plan_model: ModelRef | null;
   review_model: ModelRef | null;
   usage: { tokens: number; cost: number };
@@ -368,7 +387,12 @@ class GeasTUI {
       this.state = await this.rpc.request<SessionState>("prompt", {
         text: value,
       });
-      this.setStatus(`${this.state.phase} · Ready`);
+      if (this.state.phase === "PENDING_APPROVAL") {
+        this.addApprovalRequest();
+        this.setStatus("等待确认 · 输入 y 批准，或输入修改意见");
+      } else {
+        this.setStatus(`${this.state.phase} · Ready`);
+      }
     } catch (error) {
       this.addError(error);
     } finally {
@@ -661,7 +685,24 @@ class GeasTUI {
       if (message.role === "user") this.addUserMessage(message.content);
       else this.addAssistantMessage(message);
     }
+    if (this.state.phase === "PENDING_APPROVAL") this.addApprovalRequest();
     this.renderChrome();
+  }
+
+  private addApprovalRequest(): void {
+    if (!this.state.plan) return;
+    this.chat.addChild(
+      new Text(chalk.yellow.bold("等待你的最终确认"), 1, 1),
+    );
+    this.chat.addChild(
+      new Markdown(
+        formatPlan(this.state.plan) +
+          "\n\n---\n\n输入 `y` 确认并发布；输入其他内容作为评审意见。",
+        1,
+        0,
+        markdownTheme,
+      ),
+    );
   }
 
   private addUserMessage(text: string): void {
@@ -740,6 +781,48 @@ function formatDate(value: string): string {
     dateStyle: "short",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+function formatPlan(plan: PlanData): string {
+  const lines = [
+    `# ${plan.title || "未命名计划"}`,
+    "",
+    `**目标**　${plan.goal || "—"}`,
+    "",
+    `**说明**　${plan.description || "—"}`,
+    "",
+    `**验收标准**　${plan.acceptance_criterion || "—"}`,
+    "",
+    "## 约束",
+    ...(plan.constraints.length
+      ? plan.constraints.map((constraint) => `- ${constraint}`)
+      : ["- 无"]),
+    "",
+    "## 任务",
+  ];
+
+  if (!plan.tasks.length) lines.push("- 暂无任务");
+  else for (const task of plan.tasks) appendTask(lines, task, 0);
+  return lines.join("\n");
+}
+
+function appendTask(lines: string[], task: PlanTask, depth: number): void {
+  const indent = "  ".repeat(depth);
+  const status = {
+    pending: "○ 待开始",
+    in_progress: "◐ 进行中",
+    completed: "✓ 已完成",
+  }[task.status];
+  lines.push(`${indent}- **${status}｜${task.title}**`);
+  if (task.acceptance_criteria) {
+    lines.push(`${indent}  - 验收：${task.acceptance_criteria}`);
+  }
+  if (task.start_time || task.due_time) {
+    const start = task.start_time ? formatDate(task.start_time) : "未指定";
+    const due = task.due_time ? formatDate(task.due_time) : "未指定";
+    lines.push(`${indent}  - 时间：${start} → ${due}`);
+  }
+  for (const subtask of task.subtasks) appendTask(lines, subtask, depth + 1);
 }
 
 async function main(): Promise<void> {

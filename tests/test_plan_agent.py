@@ -14,6 +14,7 @@ from geas.ai.types import (
 )
 from geas.plan_agent.session_manager import SessionManager
 from geas.plan_agent.types import (
+    ConversationMessage,
     IssueSeverity,
     Phase,
     Plan,
@@ -89,6 +90,8 @@ def test_plan_session_runs_plan_review_to_idle() -> None:
     assert session.phase is Phase.PLAN
     asyncio.run(session.prompt("每天两个小时"))
 
+    assert session.phase is Phase.PENDING_APPROVAL
+    asyncio.run(session.prompt("y"))
     assert session.phase is Phase.IDLE
     assert session.plan.title == "发布 Geas"
     assert session.plan.goal == "发布 Geas"
@@ -297,7 +300,7 @@ def test_failed_plan_publication_can_be_retried() -> None:
     )
     session, _plan_model, _review_model = make_session(
         [],
-        review_responses=[approval, approval],
+        review_responses=[approval],
     )
     session.phase = Phase.REVIEW
     session.plan = Plan(
@@ -312,20 +315,67 @@ def test_failed_plan_publication_can_be_retried() -> None:
         raise RuntimeError("PlanWise unavailable")
 
     session.on_plan_approved = fail
-    with pytest.raises(RuntimeError, match="unavailable"):
-        asyncio.run(session.prompt("批准计划"))
+    asyncio.run(session.prompt("批准计划"))
 
-    assert session.phase is Phase.REVIEW
+    assert session.phase is Phase.PENDING_APPROVAL
+    assert attempts == []
+
+    with pytest.raises(RuntimeError, match="unavailable"):
+        asyncio.run(session.prompt("y"))
+
+    assert session.phase is Phase.PENDING_APPROVAL
     assert attempts == [session.plan]
 
     async def succeed(plan: Plan) -> None:
         attempts.append(plan)
 
     session.on_plan_approved = succeed
-    asyncio.run(session.prompt("重试"))
+    asyncio.run(session.prompt("y"))
 
     assert session.phase is Phase.IDLE
     assert attempts == [session.plan, session.plan]
+
+
+def test_human_feedback_returns_plan_to_revision() -> None:
+    session, _plan_model, review_model = make_session(
+        plan_responses=[
+            make_assistant(
+                [TextContent(type="text", text="我会修改计划。")],
+                "stop",
+            )
+        ],
+        review_responses=[
+            make_assistant(
+                [
+                    make_tool_call(
+                        "update_review_report",
+                        {
+                            "summary": "用户要求增加预算限制",
+                            "issues": [],
+                        },
+                    ),
+                    make_tool_call("request_change", {}),
+                ],
+                "toolUse",
+            )
+        ],
+    )
+    session.phase = Phase.PENDING_APPROVAL
+
+    feedback = "总预算不能超过 100 元"
+    asyncio.run(session.prompt(feedback))
+
+    assert session.phase is Phase.PLAN
+    assert session.review_report == ReviewReport(
+        summary="用户要求增加预算限制",
+    )
+    assert ConversationMessage(
+        role="user",
+        content=feedback,
+        phase=Phase.REVIEW,
+    ) in session.conversation
+    assert isinstance(review_model.contexts[0].messages[-1], UserMessage)
+    assert review_model.contexts[0].messages[-1].content == feedback
 
 
 def test_session_manager_restores_checkpoint(tmp_path) -> None:

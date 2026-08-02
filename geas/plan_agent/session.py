@@ -119,6 +119,18 @@ class PlanSession:
         ):
             raise ValueError("Plan has blocking review issues")
 
+        self.phase = Phase.PENDING_APPROVAL
+
+    async def handle_human_decision(self, decision: str) -> None:
+        if self.phase is not Phase.PENDING_APPROVAL:
+            raise ValueError("Plan is not awaiting human approval")
+
+        if decision.strip().lower() != "y":
+            self.phase = Phase.REVIEW
+            return
+
+        if self.on_plan_approved is not None:
+            await self.on_plan_approved(self.plan)
         self.phase = Phase.IDLE
 
     def tools_for(self, phase: Phase) -> list[AgentTool]:
@@ -238,6 +250,11 @@ class PlanSession:
         if self.phase is Phase.IDLE:
             return
 
+        if self.phase is Phase.PENDING_APPROVAL:
+            await self.handle_human_decision(text)
+            if self.phase is Phase.IDLE:
+                return
+
         self.conversation.append(
             ConversationMessage(
                 role="user",
@@ -247,7 +264,7 @@ class PlanSession:
         )
         next_prompt = text
 
-        while self.phase is not Phase.IDLE:
+        while self.phase in (Phase.PLAN, Phase.REVIEW):
             starting_phase = self.phase
             agent = (
                 self.plan_agent
@@ -257,17 +274,13 @@ class PlanSession:
             self._sync_agent(agent, starting_phase)
             await agent.prompt(next_prompt)
 
-            if self.phase is starting_phase or self.phase is Phase.IDLE:
+            if (
+                self.phase is starting_phase
+                or self.phase not in (Phase.PLAN, Phase.REVIEW)
+            ):
                 break
 
             next_prompt = "请根据当前阶段和 Current session state 继续。"
-
-        if self.phase is Phase.IDLE and self.on_plan_approved is not None:
-            try:
-                await self.on_plan_approved(self.plan)
-            except BaseException:
-                self.phase = Phase.REVIEW
-                raise
 
     def _record_assistant_text(
         self,
@@ -277,6 +290,7 @@ class PlanSession:
         if (
             not isinstance(event, MessageEndEvent)
             or not isinstance(event.message, AssistantMessage)
+            or event.message.stop_reason in ("error", "aborted")
         ):
             return
 

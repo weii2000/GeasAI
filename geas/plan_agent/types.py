@@ -9,6 +9,7 @@ from typing import Literal
 class Phase(StrEnum):
     PLAN = auto()
     REVIEW = auto()
+    PENDING_APPROVAL = auto()
     IDLE = auto()
 
 

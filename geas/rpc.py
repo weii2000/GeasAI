@@ -6,6 +6,8 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 
+from pydantic import TypeAdapter
+
 from geas.ai.models import Models
 from geas.ai.providers import builtin_models
 from geas.ai.types import (
@@ -46,6 +48,9 @@ from geas.actions.publish_plan import (
     publish_plan,
 )
 from geas.actions.planwise_auth import PlanWiseAuth, login_planwise
+
+
+_PLAN = TypeAdapter(Plan)
 
 
 class RPCServer:
@@ -182,6 +187,7 @@ class RPCServer:
                 "cwd": str(self.manager.cwd),
                 "phase": None,
                 "conversation": [],
+                "plan": None,
                 "plan_model": self._configured_model("PLAN"),
                 "review_model": self._configured_model("REVIEW"),
                 "usage": {"tokens": 0, "cost": 0.0},
@@ -206,6 +212,7 @@ class RPCServer:
                 }
                 for message in session.conversation
             ],
+            "plan": _PLAN.dump_python(session.plan, mode="json"),
             "plan_model": _model_data(session.plan_agent),
             "review_model": _model_data(session.review_agent),
             "usage": {"tokens": tokens, "cost": cost},

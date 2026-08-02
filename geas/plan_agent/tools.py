@@ -311,7 +311,7 @@ def create_plan_agent_tools(session: PlanSession) -> list[AgentTool]:
         _args: dict[str, object],
     ) -> AgentToolResult:
         session.approve_plan()
-        return _result("Plan approved")
+        return _result("Plan awaiting human approval")
 
     return [
         AgentTool(
@@ -364,7 +364,7 @@ def create_plan_agent_tools(session: PlanSession) -> list[AgentTool]:
         ),
         AgentTool(
             name="approve_plan",
-            description="Approve the reviewed plan.",
+            description="Submit the reviewed plan for final human approval.",
             parameters=_NO_PARAMETERS,
             execute=approve_plan,
         ),
