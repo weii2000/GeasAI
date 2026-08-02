@@ -234,6 +234,7 @@ class SecretInput implements Component, Focusable {
   private input = new Input();
 
   constructor(
+    private prefix: string,
     onSubmit: (value: string) => void,
     onEscape: () => void,
   ) {
@@ -258,14 +259,13 @@ class SecretInput implements Component, Focusable {
   }
 
   render(width: number): string[] {
-    const prefix = "API Key › ";
-    const available = Math.max(0, width - prefix.length);
+    const available = Math.max(0, width - this.prefix.length);
     const hidden = "•".repeat(
       Math.min(Array.from(this.input.getValue()).length, available),
     );
     return [
       truncateToWidth(
-        prefix + hidden + (this.focused ? CURSOR_MARKER : ""),
+        this.prefix + hidden + (this.focused ? CURSOR_MARKER : ""),
         width,
       ),
     ];
@@ -529,16 +529,25 @@ class GeasTUI {
 
   private showLogin(): void {
     const list = new SelectList(
-      this.initial.providers.map((provider) => ({
-        value: provider,
-        label: provider,
-      })),
+      [
+        {
+          value: "@planwise",
+          label: "PlanWise",
+          description: "账号登录并连接 MCP",
+        },
+        ...this.initial.providers.map((provider) => ({
+          value: provider,
+          label: provider,
+          description: "Provider API Key",
+        })),
+      ],
       8,
       selectTheme,
     );
     list.onSelect = (item) => {
       this.tui.hideOverlay();
-      this.showApiKeyInput(item.value);
+      if (item.value === "@planwise") this.showPlanwiseUsername();
+      else this.showApiKeyInput(item.value);
     };
     list.onCancel = () => this.tui.hideOverlay();
     this.showDialog("Provider", list, "↑↓ select · Enter continue · Esc");
@@ -546,6 +555,7 @@ class GeasTUI {
 
   private showApiKeyInput(provider: string): void {
     const input = new SecretInput(
+      "API Key › ",
       (value) => {
         if (!value.trim()) {
           this.setStatus("API Key 不能为空");
@@ -561,6 +571,52 @@ class GeasTUI {
       input,
       "内容不会显示 · Enter save · Esc",
     );
+  }
+
+  private showPlanwiseUsername(): void {
+    const input = new Input();
+    input.onSubmit = (value) => {
+      const username = value.trim();
+      if (!username) return this.setStatus("PlanWise 用户名不能为空");
+      this.tui.hideOverlay();
+      this.showPlanwisePassword(username);
+    };
+    input.onEscape = () => this.tui.hideOverlay();
+    this.showDialog(
+      "PlanWise Username",
+      input,
+      "Enter continue · Esc",
+    );
+  }
+
+  private showPlanwisePassword(username: string): void {
+    const input = new SecretInput(
+      "Password › ",
+      (value) => {
+        if (!value) return this.setStatus("PlanWise 密码不能为空");
+        this.tui.hideOverlay();
+        void this.loginPlanwise(username, value);
+      },
+      () => this.tui.hideOverlay(),
+    );
+    this.showDialog(
+      "PlanWise Password",
+      input,
+      "密码不会保存 · Enter login · Esc",
+    );
+  }
+
+  private async loginPlanwise(
+    username: string,
+    password: string,
+  ): Promise<void> {
+    this.setStatus("PlanWise · Logging in…");
+    try {
+      await this.rpc.request("login_planwise", { username, password });
+      this.setStatus("PlanWise · MCP 已连接");
+    } catch (error) {
+      this.addError(error);
+    }
   }
 
   private async saveApiKey(provider: string, apiKey: string): Promise<void> {

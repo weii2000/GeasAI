@@ -85,6 +85,9 @@ class Agent:
 
                 for listener in tuple(self._listeners):
                     listener(event)
+
+            if self.state.error_message is not None:
+                raise RuntimeError(self.state.error_message)
         finally:
             self.state.is_streaming = False
             self.state.streaming_message = None

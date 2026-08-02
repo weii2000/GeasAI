@@ -3,6 +3,8 @@ from datetime import datetime
 from types import SimpleNamespace
 
 import geas.mcp
+import geas.actions.planwise_auth
+import httpx2
 from geas.mcp import (
     MCPRegistry,
     MCPServerConfig,
@@ -10,6 +12,7 @@ from geas.mcp import (
 )
 from geas.plan_agent.types import Plan, Task
 from geas.actions.publish_plan import publish_plan
+from geas.actions.planwise_auth import login_planwise
 from mcp.types import TextContent
 
 
@@ -94,9 +97,16 @@ def test_mcp_connects_lazily_and_reuses_client(monkeypatch) -> None:
 
     assert len(FakeClient.instances) == 1
     assert len(FakeClient.instances[0].calls) == 2
-    assert FakeHTTPClient.instances[0].options["headers"] == {
-        "Authorization": "Bearer secret",
-    }
+    auth = FakeHTTPClient.instances[0].options["auth"]
+    request = httpx2.Request("POST", "https://tasks.example/mcp")
+    assert list(auth.auth_flow(request))[0].headers["Authorization"] == (
+        "Bearer secret"
+    )
+    registry.set_token("tasks", "new-secret")
+    request = httpx2.Request("POST", "https://tasks.example/mcp")
+    assert list(auth.auth_flow(request))[0].headers["Authorization"] == (
+        "Bearer new-secret"
+    )
 
 
 def test_planwise_create_plan_payload_is_deterministic() -> None:
@@ -161,3 +171,44 @@ def test_planwise_create_plan_payload_is_deterministic() -> None:
     tasks = remote_plan["tasks"]
     assert isinstance(tasks, list)
     assert tasks[0]["start_time"] == "2026-08-01T09:00:00+01:00"
+
+
+def test_planwise_login_returns_access_token(monkeypatch) -> None:
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        if request.url.path == "/api/auth/login":
+            assert request.content == b'{"username":"wei","password":"secret"}'
+            token = "x.eyJleHAiOjB9.x"
+            refresh_token = "refresh-1"
+        else:
+            assert request.url.path == "/api/auth/refresh"
+            assert request.headers["Cookie"] == "refreshToken=refresh-1"
+            token = "x.eyJleHAiOjQxMDI0NDQ4MDB9.x"
+            refresh_token = "refresh-2"
+        return httpx2.Response(
+            200,
+            json={"data": {"accessToken": token}},
+            headers={
+                "set-cookie": (
+                    f"refreshToken={refresh_token}; Path=/api/auth; HttpOnly"
+                )
+            },
+        )
+
+    client_type = httpx2.AsyncClient
+    transport = httpx2.MockTransport(handle)
+    monkeypatch.setattr(
+        geas.actions.planwise_auth.httpx2,
+        "AsyncClient",
+        lambda **options: client_type(transport=transport, **options),
+    )
+    auth = asyncio.run(
+        login_planwise(
+            "http://127.0.0.1:8000/mcp",
+            "wei",
+            "secret",
+        )
+    )
+    assert asyncio.run(auth.get_access_token()) == (
+        "x.eyJleHAiOjQxMDI0NDQ4MDB9.x"
+    )
+    assert auth.refresh_token == "refresh-2"

@@ -1,4 +1,5 @@
 import json
+from collections.abc import Iterator
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field, replace
 
@@ -15,6 +16,21 @@ from geas.core.types import AgentTool, AgentToolResult
 class MCPServerConfig:
     url: str
     token: str | None = field(default=None, repr=False)
+
+
+class _BearerAuth(httpx2.Auth):
+    def __init__(self, registry: "MCPRegistry", server: str) -> None:
+        self.registry = registry
+        self.server = server
+
+    def auth_flow(
+        self,
+        request: httpx2.Request,
+    ) -> Iterator[httpx2.Request]:
+        token = self.registry.servers[self.server].token
+        if token is not None:
+            request.headers["Authorization"] = f"Bearer {token}"
+        yield request
 
 
 class MCPRegistry:
@@ -42,10 +58,6 @@ class MCPRegistry:
     def set_token(self, server: str, token: str) -> None:
         if not token:
             raise ValueError("MCP token cannot be empty")
-        if server in self._clients:
-            raise RuntimeError(
-                f'MCP server "{server}" is already connected'
-            )
         try:
             config = self.servers[server]
         except KeyError as error:
@@ -88,27 +100,18 @@ class MCPRegistry:
         except KeyError as error:
             raise KeyError(f'Unknown MCP server: "{server}"') from error
 
-        if config.token is None:
-            client = await self._stack.enter_async_context(
-                Client(config.url)
+        http_client = await self._stack.enter_async_context(
+            httpx2.AsyncClient(
+                auth=_BearerAuth(self, server),
+                timeout=httpx2.Timeout(30.0, read=300.0),
+                follow_redirects=True,
             )
-        else:
-            http_client = await self._stack.enter_async_context(
-                httpx2.AsyncClient(
-                    headers={
-                        "Authorization": f"Bearer {config.token}",
-                    },
-                    timeout=httpx2.Timeout(30.0, read=300.0),
-                    follow_redirects=True,
-                )
-            )
-            transport = streamable_http_client(
-                config.url,
-                http_client=http_client,
-            )
-            client = await self._stack.enter_async_context(
-                Client(transport)
-            )
+        )
+        transport = streamable_http_client(
+            config.url,
+            http_client=http_client,
+        )
+        client = await self._stack.enter_async_context(Client(transport))
         self._clients[server] = client
         return client
 

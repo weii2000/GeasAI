@@ -104,6 +104,9 @@ def _convert_messages(
             continue
 
         if isinstance(message, AssistantMessage):
+            if message.stop_reason in ("error", "aborted"):
+                continue
+
             text = "".join(
                 block.text
                 for block in message.content

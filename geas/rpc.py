@@ -45,6 +45,7 @@ from geas.actions.publish_plan import (
     PLANWISE_SERVER_NAME,
     publish_plan,
 )
+from geas.actions.planwise_auth import PlanWiseAuth, login_planwise
 
 
 class RPCServer:
@@ -69,6 +70,7 @@ class RPCServer:
         self.planwise_enabled = (
             PLANWISE_SERVER_NAME in mcp_registry.servers
         )
+        self.planwise_auth: PlanWiseAuth | None = None
         self.skills_root = skills_root
         self.manager = SessionManager.create()
         self.session: PlanSession | None = None
@@ -148,6 +150,23 @@ class RPCServer:
             save_api_key(
                 _require_str(params, "provider"),
                 _require_str(params, "api_key"),
+            )
+            return None
+        if method == "login_planwise":
+            try:
+                config = self.mcp_registry.servers[PLANWISE_SERVER_NAME]
+            except KeyError as error:
+                raise ValueError(
+                    "PlanWise MCP is not configured"
+                ) from error
+            self.planwise_auth = await login_planwise(
+                config.url,
+                _require_str(params, "username"),
+                _require_str(params, "password"),
+            )
+            self.mcp_registry.set_token(
+                PLANWISE_SERVER_NAME,
+                self.planwise_auth.access_token,
             )
             return None
         if method == "shutdown":
@@ -271,6 +290,11 @@ class RPCServer:
         ]
 
     async def _publish_plan(self, plan: Plan) -> None:
+        if self.planwise_auth is not None:
+            self.mcp_registry.set_token(
+                PLANWISE_SERVER_NAME,
+                await self.planwise_auth.get_access_token(),
+            )
         publication = await publish_plan(
             self.mcp_registry,
             self.manager.session_id,
