@@ -103,13 +103,22 @@ class PlanSession:
         self.review_report = report
 
     def submit_plan(self) -> None:
+        if self.phase is not Phase.PLAN:
+            raise ValueError("Plan can only be submitted in PLAN phase")
         self.review_report = None
         self.phase = Phase.REVIEW
 
     def request_change(self) -> None:
+        if self.phase is not Phase.REVIEW:
+            raise ValueError(
+                "Changes can only be requested in REVIEW phase"
+            )
         self.phase = Phase.PLAN
 
     def approve_plan(self) -> None:
+        if self.phase is not Phase.REVIEW:
+            raise ValueError("Plan can only be approved in REVIEW phase")
+
         if self.review_report is None:
             raise ValueError("Plan has not been reviewed")
 

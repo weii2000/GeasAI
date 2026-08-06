@@ -246,6 +246,24 @@ def test_blocking_review_cannot_be_approved() -> None:
     assert session.phase is Phase.REVIEW
 
 
+def test_state_transitions_require_the_expected_phase() -> None:
+    session, _plan_model, _review_model = make_session([])
+
+    session.submit_plan()
+    with pytest.raises(ValueError, match="PLAN phase"):
+        session.submit_plan()
+
+    session.request_change()
+    with pytest.raises(ValueError, match="REVIEW phase"):
+        session.request_change()
+
+    session.submit_plan()
+    session.update_review_report(ReviewReport(summary="计划可以执行"))
+    session.approve_plan()
+    with pytest.raises(ValueError, match="REVIEW phase"):
+        session.approve_plan()
+
+
 def test_task_tree_rejects_skipped_levels() -> None:
     with pytest.raises(
         ValueError,
