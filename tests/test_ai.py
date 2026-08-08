@@ -5,14 +5,14 @@ from typing import cast
 
 import pytest
 
-from geas.ai.event_stream import AssistantMessageEventStream
-from geas.ai.openai_completions import (
+from geas.ai.event_stream import AssistantResponseStream
+from geas.ai.apis.openai_completions import (
     _convert_messages,
     _reasoning_delta,
 )
 from geas.ai.providers import builtin_models
 from geas.ai.providers.deepseek import DEEPSEEK_MODELS
-from geas.ai.types import Context, ErrorEvent, ThinkingContent
+from geas.ai.types import Context, ResponseErrorEvent, ThinkingContent
 from geas.core.agent import Agent
 from geas.core.types import AgentState
 
@@ -92,9 +92,11 @@ def test_failed_response_is_reported_and_not_replayed() -> None:
     failed.stop_reason = "error"
     failed.error_message = "invalid tool arguments"
 
-    def stream(*_args: object) -> AssistantMessageEventStream:
-        events = AssistantMessageEventStream()
-        events.push(ErrorEvent(type="error", reason="error", error=failed))
+    def stream(*_args: object) -> AssistantResponseStream:
+        events = AssistantResponseStream()
+        events.push(
+            ResponseErrorEvent(type="error", reason="error", error=failed)
+        )
         return events
 
     agent = Agent(

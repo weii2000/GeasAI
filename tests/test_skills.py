@@ -33,7 +33,6 @@ def test_skill_directories_map_to_profiles(tmp_path) -> None:
     assert base.skills == ("base-skill",)
     assert profiles[Phase.PLAN].skills == ("plan-skill",)
     assert profiles[Phase.REVIEW].skills == ("review-skill",)
-    assert profiles[Phase.IDLE].skills == ()
 
     session, _, _ = make_session([], skill_registry=registry)
     session.base_profile = base

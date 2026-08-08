@@ -4,7 +4,7 @@ from typing import Literal
 
 from geas.ai.types import (
     AssistantMessage,
-    AssistantMessageEvent,
+    AssistantResponseEvent,
     ImageContent,
     Message,
     Model,
@@ -69,12 +69,12 @@ class AgentLoopConfig:
 
 
 @dataclass
-class AgentStartEvent:
+class AgentRunStartEvent:
     type: Literal["agent_start"]
 
 
 @dataclass
-class AgentEndEvent:
+class AgentRunEndEvent:
     type: Literal["agent_end"]
     messages: list[Message]
 
@@ -101,7 +101,7 @@ class MessageStartEvent:
 class MessageUpdateEvent:
     type: Literal["message_update"]
     message: AssistantMessage
-    assistant_message_event: AssistantMessageEvent
+    assistant_response_event: AssistantResponseEvent
 
 
 @dataclass
@@ -127,9 +127,9 @@ class ToolExecutionEndEvent:
     is_error: bool
 
 
-type AgentEvent = (
-    AgentStartEvent
-    | AgentEndEvent
+type AgentRunEvent = (
+    AgentRunStartEvent
+    | AgentRunEndEvent
     | TurnStartEvent
     | TurnEndEvent
     | MessageStartEvent

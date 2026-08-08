@@ -1,13 +1,13 @@
-from ..models import Models
-from ..openai_completions import stream_openai_completions
+from ..apis import stream_openai_completions
+from ..model_registry import ModelRegistry
 from .deepseek import DEEPSEEK_MODELS
 from .glm import GLM_MODELS
 from .kimi import KIMI_MODELS
 from .qwen import QWEN_MODELS
 
 
-def builtin_models() -> Models:
-    models = Models()
+def builtin_models() -> ModelRegistry:
+    models = ModelRegistry()
     for catalog in (
         DEEPSEEK_MODELS,
         QWEN_MODELS,

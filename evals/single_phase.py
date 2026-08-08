@@ -8,9 +8,11 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
-from typing import Literal, cast
+from typing import Literal
 
-from geas.ai.models import Models
+from pydantic import TypeAdapter
+
+from geas.ai.model_registry import ModelRegistry
 from geas.ai.providers import builtin_models
 from geas.ai.types import AssistantMessage, Model, TextContent, Usage
 from geas.config import (
@@ -29,11 +31,8 @@ from geas.plan_agent.types import (
     IssueSeverity,
     Phase,
     Plan,
-    ReviewIssue,
     ReviewReport,
     Task,
-    TaskLevel,
-    TaskStatus,
 )
 
 DEFAULT_SUITE_PATH = Path(__file__).with_name(
@@ -65,13 +64,18 @@ class Expectation:
 
 
 @dataclass(frozen=True)
+class EvalInput:
+    prompt: str
+    plan: Plan = field(default_factory=Plan)
+    review_report: ReviewReport | None = None
+
+
+@dataclass(frozen=True)
 class EvalCase:
     case_id: str
     description: str
     target: EvalTarget
-    prompt: str
-    plan: Plan
-    review_report: ReviewReport | None
+    input: EvalInput
     expected: Expectation
 
 
@@ -89,169 +93,15 @@ class Check:
     detail: str
 
 
+_EVAL_SUITE = TypeAdapter(EvalSuite)
+
+
 def load_suite(path: Path = DEFAULT_SUITE_PATH) -> EvalSuite:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    cases = [_parse_case(case) for case in payload["cases"]]
-    case_ids = [case.case_id for case in cases]
+    suite = _EVAL_SUITE.validate_json(path.read_bytes())
+    case_ids = [case.case_id for case in suite.cases]
     if len(case_ids) != len(set(case_ids)):
         raise ValueError("Eval case ids must be unique")
-    return EvalSuite(
-        name=str(payload["name"]),
-        version=str(payload["version"]),
-        cases=cases,
-    )
-
-
-def _parse_case(data: dict[str, object]) -> EvalCase:
-    target = str(data["target"])
-    if target not in ("plan", "review"):
-        raise ValueError(f"Unknown eval target: {target}")
-
-    inputs = data["input"]
-    expected = data["expected"]
-    if not isinstance(inputs, dict) or not isinstance(expected, dict):
-        raise TypeError("Eval input and expected must be objects")
-
-    plan_data = inputs.get("plan")
-    report_data = inputs.get("review_report")
-    plan = _parse_plan(plan_data) if isinstance(plan_data, dict) else Plan()
-    report = (
-        _parse_review_report(report_data)
-        if isinstance(report_data, dict)
-        else None
-    )
-    severity = expected.get("minimum_issue_severity")
-
-    return EvalCase(
-        case_id=str(data["case_id"]),
-        description=str(data["description"]),
-        target=target,
-        prompt=str(inputs["prompt"]),
-        plan=plan,
-        review_report=report,
-        expected=Expectation(
-            phase=Phase(str(expected["phase"])),
-            require_complete_plan=bool(
-                expected.get("require_complete_plan", False)
-            ),
-            require_plan_unchanged=bool(
-                expected.get("require_plan_unchanged", False)
-            ),
-            min_task_count=int(expected.get("min_task_count", 0)),
-            max_task_count=_optional_int(
-                expected.get("max_task_count")
-            ),
-            min_top_level_task_count=int(
-                expected.get("min_top_level_task_count", 0)
-            ),
-            max_top_level_task_count=_optional_int(
-                expected.get("max_top_level_task_count")
-            ),
-            min_question_count=_optional_int(
-                expected.get("min_question_count")
-            ),
-            max_question_count=_optional_int(
-                expected.get("max_question_count")
-            ),
-            require_complete_review_report=bool(
-                expected.get("require_complete_review_report", False)
-            ),
-            min_issue_count=int(expected.get("min_issue_count", 0)),
-            minimum_issue_severity=(
-                IssueSeverity(str(severity))
-                if severity is not None
-                else None
-            ),
-            required_plan_terms=_term_groups(
-                expected.get("required_plan_terms", [])
-            ),
-            required_constraint_terms=_term_groups(
-                expected.get("required_constraint_terms", [])
-            ),
-            required_issue_terms=_term_groups(
-                expected.get("required_issue_terms", [])
-            ),
-        ),
-    )
-
-
-def _parse_plan(data: dict[str, object]) -> Plan:
-    tasks = data.get("tasks", [])
-    constraints = data.get("constraints", [])
-    if not isinstance(tasks, list):
-        raise TypeError("Plan tasks must be a list")
-    if not isinstance(constraints, list):
-        raise TypeError("Plan constraints must be a list")
-    return Plan(
-        title=str(data.get("title", "")),
-        goal=str(data.get("goal", "")),
-        description=str(data.get("description", "")),
-        acceptance_criterion=str(data.get("acceptance_criterion", "")),
-        constraints=[str(constraint) for constraint in constraints],
-        tasks=[_parse_task(task) for task in tasks],
-    )
-
-
-def _parse_task(data: object) -> Task:
-    if not isinstance(data, dict):
-        raise TypeError("Task must be an object")
-    subtasks = data.get("subtasks", [])
-    if not isinstance(subtasks, list):
-        raise TypeError("Task subtasks must be a list")
-    level = int(data["level"])
-    if level not in (1, 2, 3):
-        raise ValueError("Task level must be 1, 2, or 3")
-    return Task(
-        title=str(data["title"]),
-        level=cast(TaskLevel, level),
-        status=TaskStatus(str(data.get("status", TaskStatus.PENDING))),
-        acceptance_criteria=(
-            str(data["acceptance_criteria"])
-            if data.get("acceptance_criteria") is not None
-            else None
-        ),
-        start_time=_parse_datetime(data.get("start_time")),
-        due_time=_parse_datetime(data.get("due_time")),
-        subtasks=[_parse_task(subtask) for subtask in subtasks],
-    )
-
-
-def _parse_datetime(value: object) -> datetime | None:
-    return datetime.fromisoformat(str(value)) if value is not None else None
-
-
-def _parse_review_report(data: dict[str, object]) -> ReviewReport:
-    issues = data.get("issues", [])
-    if not isinstance(issues, list):
-        raise TypeError("Review issues must be a list")
-    return ReviewReport(
-        summary=str(data.get("summary", "")),
-        issues=[_parse_issue(issue) for issue in issues],
-    )
-
-
-def _parse_issue(data: object) -> ReviewIssue:
-    if not isinstance(data, dict):
-        raise TypeError("Review issue must be an object")
-    return ReviewIssue(
-        description=str(data["description"]),
-        evidence=str(data["evidence"]),
-        severity=IssueSeverity(str(data["severity"])),
-    )
-
-
-def _optional_int(value: object) -> int | None:
-    return int(value) if value is not None else None
-
-
-def _term_groups(value: object) -> list[list[str]]:
-    if not isinstance(value, list):
-        raise TypeError("Term groups must be a list")
-    return [
-        [str(term) for term in group]
-        for group in value
-        if isinstance(group, list)
-    ]
+    return suite
 
 
 def _new_session(model: Model) -> PlanSession:
@@ -281,8 +131,8 @@ async def run_case(
     str | None,
 ]:
     session = _new_session(model)
-    session.plan = case.plan
-    session.review_report = case.review_report
+    session.plan = case.input.plan
+    session.review_report = case.input.review_report
     session.phase = (
         Phase.PLAN if case.target == "plan" else Phase.REVIEW
     )
@@ -297,7 +147,7 @@ async def run_case(
     started = perf_counter()
     error_message: str | None = None
     try:
-        await agent.prompt(case.prompt)
+        await agent.prompt(case.input.prompt)
     except Exception as error:
         error_message = f"{type(error).__name__}: {error}"
     latency_ms = (perf_counter() - started) * 1000
@@ -353,7 +203,7 @@ def _score(
     if expected.require_plan_unchanged:
         checks.append(Check(
             "plan_unchanged",
-            session.plan == case.plan,
+            session.plan == case.input.plan,
             "plan must not change before clarification",
         ))
 
@@ -641,7 +491,7 @@ async def _run(args: argparse.Namespace) -> int:
 
 def _select_models(
     cases: list[EvalCase],
-    models: Models,
+    models: ModelRegistry,
     args: argparse.Namespace,
 ) -> dict[EvalTarget, Model]:
     override = (

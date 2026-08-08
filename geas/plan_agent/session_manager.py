@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from pydantic import TypeAdapter, ValidationError
 
-from geas.ai.models import Models
+from geas.ai.model_registry import ModelRegistry
 from geas.ai.types import AssistantMessage, Message
 from geas.core.agent import Agent
 from geas.core.types import AgentState, AgentTool
@@ -97,21 +97,6 @@ class SessionManager:
         )
 
     @classmethod
-    def continue_recent(
-        cls,
-        cwd: Path | None = None,
-        root: Path | None = None,
-    ) -> "SessionManager | None":
-        resolved_cwd = (cwd or Path.cwd()).resolve()
-        directory = _session_directory(resolved_cwd, root)
-        files = list(directory.glob("*.json"))
-        if not files:
-            return None
-
-        latest = max(files, key=lambda path: path.stat().st_mtime)
-        return cls.open(latest.stem, resolved_cwd, root)
-
-    @classmethod
     def list_saved(
         cls,
         cwd: Path | None = None,
@@ -158,7 +143,7 @@ class SessionManager:
 
     def load(
         self,
-        models: Models,
+        models: ModelRegistry,
         skills_root: Path | None = None,
         extra_tools: list[AgentTool] | None = None,
     ) -> PlanSession:
@@ -247,7 +232,7 @@ def _agent_snapshot(agent: Agent) -> AgentSnapshot:
 
 def _restore_agent(
     snapshot: AgentSnapshot,
-    models: Models,
+    models: ModelRegistry,
     max_turns: int,
 ) -> Agent:
     model = models.get_model(snapshot.provider, snapshot.model)

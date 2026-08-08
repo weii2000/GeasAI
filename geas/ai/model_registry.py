@@ -1,20 +1,16 @@
-from collections.abc import Iterable
-from typing import Protocol
+from collections.abc import Callable, Iterable
 
-from .event_stream import AssistantMessageEventStream
+from .event_stream import AssistantResponseStream
 from .types import AssistantMessage, Context, Model, StreamOptions
 
 
-class StreamFunction(Protocol):
-    def __call__(
-        self,
-        model: Model,
-        context: Context,
-        options: StreamOptions | None = None,
-    ) -> AssistantMessageEventStream: ...
+type StreamFunction = Callable[
+    [Model, Context, StreamOptions | None],
+    AssistantResponseStream,
+]
 
 
-class Models:
+class ModelRegistry:
     def __init__(self) -> None:
         self._models: dict[tuple[str, str], Model] = {}
         self._apis: dict[str, StreamFunction] = {}
@@ -50,7 +46,7 @@ class Models:
         model: Model,
         context: Context,
         options: StreamOptions | None = None,
-    ) -> AssistantMessageEventStream:
+    ) -> AssistantResponseStream:
         stream_function = self._apis.get(model.api)
 
         if stream_function is None:

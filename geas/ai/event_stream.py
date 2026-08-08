@@ -4,9 +4,9 @@ from typing import cast
 
 from .types import (
     AssistantMessage,
-    AssistantMessageEvent,
-    DoneEvent,
-    ErrorEvent,
+    AssistantResponseEvent,
+    ResponseDoneEvent,
+    ResponseErrorEvent,
 )
 
 _END = object()
@@ -95,22 +95,22 @@ class EventStream[Event, Result]:
         return self._result
 
 
-def _is_assistant_done(event: AssistantMessageEvent) -> bool:
-    return isinstance(event, DoneEvent | ErrorEvent)
+def _is_response_done(event: AssistantResponseEvent) -> bool:
+    return isinstance(event, ResponseDoneEvent | ResponseErrorEvent)
 
 
-def _get_assistant_result(
-    event: AssistantMessageEvent,
+def _get_response_result(
+    event: AssistantResponseEvent,
 ) -> AssistantMessage:
-    if isinstance(event, DoneEvent):
+    if isinstance(event, ResponseDoneEvent):
         return event.message
-    if isinstance(event, ErrorEvent):
+    if isinstance(event, ResponseErrorEvent):
         return event.error
-    raise ValueError("Assistant stream has not finished")
+    raise ValueError("Assistant response stream has not finished")
 
 
-class AssistantMessageEventStream(
-    EventStream[AssistantMessageEvent, AssistantMessage]
+class AssistantResponseStream(
+    EventStream[AssistantResponseEvent, AssistantMessage]
 ):
     def __init__(self) -> None:
-        super().__init__(_is_assistant_done, _get_assistant_result)
+        super().__init__(_is_response_done, _get_response_result)

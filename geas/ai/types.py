@@ -163,7 +163,7 @@ class Model:
 
 
 @dataclass
-class StartEvent:
+class ResponseStartEvent:
     type: Literal["start"]
     partial: AssistantMessage
 
@@ -242,21 +242,21 @@ type ErrorReason = Literal["error", "aborted"]
 
 
 @dataclass
-class DoneEvent:
+class ResponseDoneEvent:
     type: Literal["done"]
     reason: DoneReason
     message: AssistantMessage
 
 
 @dataclass
-class ErrorEvent:
+class ResponseErrorEvent:
     type: Literal["error"]
     reason: ErrorReason
     error: AssistantMessage
 
 
-type AssistantMessageEvent = (
-    StartEvent
+type AssistantResponseEvent = (
+    ResponseStartEvent
     | TextStartEvent
     | TextDeltaEvent
     | TextEndEvent
@@ -266,8 +266,8 @@ type AssistantMessageEvent = (
     | ToolCallStartEvent
     | ToolCallDeltaEvent
     | ToolCallEndEvent
-    | DoneEvent
-    | ErrorEvent
+    | ResponseDoneEvent
+    | ResponseErrorEvent
 )
 
 

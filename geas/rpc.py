@@ -5,10 +5,11 @@ from collections.abc import Callable
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 from pydantic import TypeAdapter
 
-from geas.ai.models import Models
+from geas.ai.model_registry import ModelRegistry
 from geas.ai.providers import builtin_models
 from geas.ai.types import (
     AssistantMessage,
@@ -26,7 +27,7 @@ from geas.config import (
 )
 from geas.core.agent import Agent
 from geas.core.types import (
-    AgentEvent,
+    AgentRunEvent,
     AgentState,
     AgentTool,
     MessageStartEvent,
@@ -56,7 +57,7 @@ _PLAN = TypeAdapter(Plan)
 class RPCServer:
     def __init__(
         self,
-        models: Models,
+        models: ModelRegistry,
         mcp_registry: MCPRegistry,
         skills_root: Path,
     ) -> None:
@@ -339,7 +340,7 @@ class RPCServer:
 
     def _emit_agent_event(
         self,
-        event: AgentEvent,
+        event: AgentRunEvent,
         phase: AgentPhaseName,
     ) -> None:
         if (
@@ -352,7 +353,7 @@ class RPCServer:
                 "phase": phase,
             })
         elif isinstance(event, MessageUpdateEvent):
-            update = event.assistant_message_event
+            update = event.assistant_response_event
             if isinstance(update, TextDeltaEvent):
                 _send({
                     "type": "event",
@@ -402,7 +403,7 @@ def _require_phase(params: dict[str, object]) -> AgentPhaseName:
     phase = _require_str(params, "phase")
     if phase not in {"PLAN", "REVIEW"}:
         raise ValueError("phase must be PLAN or REVIEW")
-    return phase
+    return cast(AgentPhaseName, phase)
 
 
 def _send(message: object) -> None:

@@ -4,11 +4,11 @@ import asyncio
 import json
 import os
 import signal
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ddgs import DDGS
+from pydantic import TypeAdapter
 
 from geas.ai.types import TextContent
 from geas.core.types import AgentTool, AgentToolResult
@@ -17,9 +17,7 @@ from .skills import Skill
 from .types import (
     IssueSeverity,
     Plan,
-    ReviewIssue,
     ReviewReport,
-    Task,
     TaskStatus,
 )
 
@@ -28,6 +26,8 @@ if TYPE_CHECKING:
 
 
 _BASH_OUTPUT_LIMIT = 100_000
+_PLAN = TypeAdapter(Plan)
+_REVIEW_REPORT = TypeAdapter(ReviewReport)
 
 _TASK_SCHEMA: dict[str, object] = {
     "type": "object",
@@ -259,37 +259,14 @@ def create_plan_agent_tools(session: PlanSession) -> list[AgentTool]:
         _tool_call_id: str,
         args: dict[str, object],
     ) -> AgentToolResult:
-        session.update_plan(
-            Plan(
-                title=str(args["title"]),
-                goal=str(args["goal"]),
-                description=str(args["description"]),
-                acceptance_criterion=str(args["acceptance_criterion"]),
-                constraints=[
-                    str(constraint)
-                    for constraint in args["constraints"]  # type: ignore[union-attr]
-                ],
-                tasks=[
-                    _task_from_dict(task)
-                    for task in args["tasks"]  # type: ignore[union-attr]
-                ],
-            )
-        )
+        session.plan = _PLAN.validate_python(args)
         return _result("Plan updated")
 
     async def update_review_report(
         _tool_call_id: str,
         args: dict[str, object],
     ) -> AgentToolResult:
-        session.update_review_report(
-            ReviewReport(
-                summary=str(args["summary"]),
-                issues=[
-                    _review_issue_from_dict(issue)
-                    for issue in args["issues"]  # type: ignore[union-attr]
-                ],
-            )
-        )
+        session.review_report = _REVIEW_REPORT.validate_python(args)
         return _result("Review report updated")
 
     async def submit_plan(
@@ -369,51 +346,6 @@ def create_plan_agent_tools(session: PlanSession) -> list[AgentTool]:
             execute=approve_plan,
         ),
     ]
-
-
-def _task_from_dict(data: object) -> Task:
-    if not isinstance(data, dict):
-        raise TypeError("Task must be an object")
-
-    subtasks = data.get("subtasks", [])
-    if not isinstance(subtasks, list):
-        raise TypeError("Task subtasks must be a list")
-
-    return Task(
-        title=str(data["title"]),
-        level=data["level"],  # type: ignore[arg-type]
-        status=TaskStatus(str(data.get("status", TaskStatus.PENDING))),
-        acceptance_criteria=(
-            str(data["acceptance_criteria"])
-            if data.get("acceptance_criteria") is not None
-            else None
-        ),
-        start_time=_optional_datetime(data.get("start_time")),
-        due_time=_optional_datetime(data.get("due_time")),
-        subtasks=[_task_from_dict(subtask) for subtask in subtasks],
-    )
-
-
-def _optional_datetime(value: object) -> datetime | None:
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise TypeError("Task time must be an ISO 8601 string or null")
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError as error:
-        raise ValueError(f'Invalid Task time: "{value}"') from error
-
-
-def _review_issue_from_dict(data: object) -> ReviewIssue:
-    if not isinstance(data, dict):
-        raise TypeError("Review issue must be an object")
-
-    return ReviewIssue(
-        description=str(data["description"]),
-        evidence=str(data["evidence"]),
-        severity=IssueSeverity(str(data["severity"])),
-    )
 
 
 def _result(text: str) -> AgentToolResult:

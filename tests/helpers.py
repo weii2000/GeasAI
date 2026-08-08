@@ -1,12 +1,12 @@
 from dataclasses import replace
 from typing import Literal
 
-from geas.ai.event_stream import AssistantMessageEventStream
+from geas.ai.event_stream import AssistantResponseStream
 from geas.ai.providers.deepseek import DEEPSEEK_MODELS
 from geas.ai.types import (
     AssistantMessage,
     Context,
-    DoneEvent,
+    ResponseDoneEvent,
     Model,
     StreamOptions,
     TextContent,
@@ -36,15 +36,15 @@ class ScriptedModel:
         model: Model,
         context: Context,
         _options: StreamOptions | None = None,
-    ) -> AssistantMessageEventStream:
+    ) -> AssistantResponseStream:
         self.models.append(model)
         self.contexts.append(context)
-        stream = AssistantMessageEventStream()
+        stream = AssistantResponseStream()
         message = next(self._responses)
         if message.stop_reason not in ("stop", "length", "toolUse"):
             raise ValueError("Scripted response must be a done message")
         stream.push(
-            DoneEvent(
+            ResponseDoneEvent(
                 type="done",
                 reason=message.stop_reason,
                 message=message,

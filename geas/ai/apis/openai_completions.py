@@ -8,16 +8,16 @@ from openai import AsyncOpenAI, omit
 from openai.types.completion_usage import CompletionUsage
 from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolParam
 
-from .event_stream import AssistantMessageEventStream
-from .types import (
+from ..event_stream import AssistantResponseStream
+from ..types import (
     AssistantMessage,
     Context,
-    DoneEvent,
+    ResponseDoneEvent,
     DoneReason,
-    ErrorEvent,
+    ResponseErrorEvent,
     ImageContent,
     Model,
-    StartEvent,
+    ResponseStartEvent,
     StreamOptions,
     TextContent,
     TextDeltaEvent,
@@ -317,8 +317,9 @@ def stream_openai_completions(
     model: Model,
     context: Context,
     options: StreamOptions | None = None,
-) -> AssistantMessageEventStream:
-    output = AssistantMessageEventStream()
+) -> AssistantResponseStream:
+    """启动后台 OpenAI-compatible 调用，并立即返回可异步消费的响应事件流。"""
+    output = AssistantResponseStream()
     task = asyncio.create_task(
         _run_stream(output, model, context, options)
     )
@@ -327,13 +328,13 @@ def stream_openai_completions(
 
 
 async def _run_stream(
-    output: AssistantMessageEventStream,
+    output: AssistantResponseStream,
     model: Model,
     context: Context,
     options: StreamOptions | None,
 ) -> None:
     partial = _create_partial_message(model)
-    output.push(StartEvent(type="start", partial=partial))
+    output.push(ResponseStartEvent(type="start", partial=partial))
 
     thinking: ThinkingContent | None = None
     text: TextContent | None = None
@@ -560,7 +561,7 @@ async def _run_stream(
         done_reason = _map_stop_reason(finish_reason)
         partial.stop_reason = done_reason
         output.push(
-            DoneEvent(
+            ResponseDoneEvent(
                 type="done",
                 reason=done_reason,
                 message=partial,
@@ -570,7 +571,7 @@ async def _run_stream(
         partial.stop_reason = "error"
         partial.error_message = str(error)
         output.push(
-            ErrorEvent(
+            ResponseErrorEvent(
                 type="error",
                 reason="error",
                 error=partial,

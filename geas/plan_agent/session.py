@@ -7,7 +7,7 @@ from geas.ai.types import AssistantMessage, TextContent
 from geas.core.agent import Agent
 from geas.core.types import (
     AgentContext,
-    AgentEvent,
+    AgentRunEvent,
     AgentTool,
     MessageEndEvent,
     TurnEndEvent,
@@ -95,12 +95,6 @@ class PlanSession:
         )
         self._sync_agent(self.plan_agent, Phase.PLAN)
         self._sync_agent(self.review_agent, Phase.REVIEW)
-
-    def update_plan(self, plan: Plan) -> None:
-        self.plan = plan
-
-    def update_review_report(self, report: ReviewReport) -> None:
-        self.review_report = report
 
     def submit_plan(self) -> None:
         if self.phase is not Phase.PLAN:
@@ -293,7 +287,7 @@ class PlanSession:
 
     def _record_assistant_text(
         self,
-        event: AgentEvent,
+        event: AgentRunEvent,
         phase: Phase,
     ) -> None:
         if (

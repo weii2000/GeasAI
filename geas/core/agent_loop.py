@@ -3,24 +3,24 @@ import time
 
 from jsonschema import ValidationError, validate
 
-from geas.ai.models import StreamFunction
+from geas.ai.model_registry import StreamFunction
 from geas.ai.types import (
     Context,
-    DoneEvent,
-    ErrorEvent,
+    ResponseDoneEvent,
+    ResponseErrorEvent,
     Message,
-    StartEvent,
+    ResponseStartEvent,
     TextContent,
     ToolCall,
     ToolResultMessage,
 )
 
-from .event_stream import AgentEventStream
+from .event_stream import AgentRunStream
 from .types import (
     AgentContext,
-    AgentEndEvent,
+    AgentRunEndEvent,
     AgentLoopConfig,
-    AgentStartEvent,
+    AgentRunStartEvent,
     AgentTool,
     AgentToolResult,
     MessageEndEvent,
@@ -39,8 +39,9 @@ def agent_loop(
     config: AgentLoopConfig,
     stream_function: StreamFunction,
     max_turns: int,
-) -> AgentEventStream:
-    output = AgentEventStream()
+) -> AgentRunStream:
+    """启动一次后台 Agent 运行，并立即返回可异步消费的运行事件流。"""
+    output = AgentRunStream()
     task = asyncio.create_task(
         _run_agent_loop_safely(
             output,
@@ -56,7 +57,7 @@ def agent_loop(
 
 
 async def _run_agent_loop_safely(
-    output: AgentEventStream,
+    output: AgentRunStream,
     prompts: list[Message],
     context: AgentContext,
     config: AgentLoopConfig,
@@ -156,14 +157,14 @@ def _create_truncated_tool_result(
 
 
 async def _run_agent_loop(
-    output: AgentEventStream,
+    output: AgentRunStream,
     prompts: list[Message],
     context: AgentContext,
     config: AgentLoopConfig,
     stream_function: StreamFunction,
     max_turns: int,
 ) -> None:
-    output.push(AgentStartEvent(type="agent_start"))
+    output.push(AgentRunStartEvent(type="agent_start"))
     output.push(TurnStartEvent(type="turn_start"))
 
     for prompt in prompts:
@@ -194,24 +195,24 @@ async def _run_agent_loop(
             system_prompt=context.system_prompt,
             tools=list(context.tools) or None,
         )
-        response = stream_function(config.model, ai_context)
+        response = stream_function(config.model, ai_context, None)
 
         async for event in response:
-            if isinstance(event, StartEvent):
+            if isinstance(event, ResponseStartEvent):
                 output.push(
                     MessageStartEvent(
                         type="message_start",
                         message=event.partial,
                     )
                 )
-            elif isinstance(event, DoneEvent):
+            elif isinstance(event, ResponseDoneEvent):
                 output.push(
                     MessageEndEvent(
                         type="message_end",
                         message=event.message,
                     )
                 )
-            elif isinstance(event, ErrorEvent):
+            elif isinstance(event, ResponseErrorEvent):
                 output.push(
                     MessageEndEvent(
                         type="message_end",
@@ -223,7 +224,7 @@ async def _run_agent_loop(
                     MessageUpdateEvent(
                         type="message_update",
                         message=event.partial,
-                        assistant_message_event=event,
+                        assistant_response_event=event,
                     )
                 )
 
@@ -323,7 +324,7 @@ async def _run_agent_loop(
             break
 
     output.push(
-        AgentEndEvent(
+        AgentRunEndEvent(
             type="agent_end",
             messages=new_messages,
         )

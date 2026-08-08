@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from geas.ai.models import Models
+from geas.ai.model_registry import ModelRegistry
 from geas.ai.types import (
     AssistantMessage,
     TextContent,
@@ -224,17 +224,15 @@ def test_agent_stops_after_max_turns() -> None:
 def test_blocking_review_cannot_be_approved() -> None:
     session, _plan_model, _review_model = make_session([])
     session.submit_plan()
-    session.update_review_report(
-        ReviewReport(
-            summary="计划缺少关键内容",
-            issues=[
-                ReviewIssue(
-                    description="没有验收标准",
-                    evidence="acceptance_criterion 为空",
-                    severity=IssueSeverity.BLOCKING,
-                ),
-            ],
-        )
+    session.review_report = ReviewReport(
+        summary="计划缺少关键内容",
+        issues=[
+            ReviewIssue(
+                description="没有验收标准",
+                evidence="acceptance_criterion 为空",
+                severity=IssueSeverity.BLOCKING,
+            ),
+        ],
     )
 
     with pytest.raises(
@@ -258,7 +256,7 @@ def test_state_transitions_require_the_expected_phase() -> None:
         session.request_change()
 
     session.submit_plan()
-    session.update_review_report(ReviewReport(summary="计划可以执行"))
+    session.review_report = ReviewReport(summary="计划可以执行")
     session.approve_plan()
     with pytest.raises(ValueError, match="REVIEW phase"):
         session.approve_plan()
@@ -426,7 +424,7 @@ def test_session_manager_restores_checkpoint(tmp_path) -> None:
         ),
     ]
 
-    models = Models()
+    models = ModelRegistry()
     models.register_models([
         session.plan_agent.state.model,
         session.review_agent.state.model,
@@ -455,9 +453,6 @@ def test_session_manager_restores_checkpoint(tmp_path) -> None:
         restored.plan_agent.state.messages
         == session.plan_agent.state.messages
     )
-    recent = SessionManager.continue_recent(cwd, root)
-    assert recent is not None
-    assert recent.session_id == manager.session_id
     assert [
         saved.session_id
         for saved in SessionManager.list_saved(cwd, root)

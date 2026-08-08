@@ -51,11 +51,6 @@ REVIEW_PROMPT = """
 - 在本次 Agent 调用结束前必须完成上述 Tool 调用。
 """.strip()
 
-IDLE_PROMPT = """
-你当前处于 IDLE 阶段，本轮规划已经完成。简洁说明最终结果，不主动修改计划。
-""".strip()
-
-
 @dataclass(frozen=True)
 class Profile:
     prompt: str = ""
@@ -80,10 +75,6 @@ PHASE_PROFILES = {
             "request_change",
             "approve_plan",
         ),
-    ),
-    Phase.IDLE: Profile(
-        prompt=IDLE_PROMPT,
-        tools=("request_change",),
     ),
 }
 

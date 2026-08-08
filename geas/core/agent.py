@@ -1,13 +1,13 @@
 import time
 from collections.abc import Callable
 
-from geas.ai.models import StreamFunction
+from geas.ai.model_registry import StreamFunction
 from geas.ai.types import UserMessage
 
 from .agent_loop import agent_loop
 from .types import (
     AgentContext,
-    AgentEvent,
+    AgentRunEvent,
     AgentLoopConfig,
     AgentState,
     MessageEndEvent,
@@ -20,7 +20,7 @@ from .types import (
     TurnEndEvent,
 )
 
-type AgentListener = Callable[[AgentEvent], None]
+type AgentRunListener = Callable[[AgentRunEvent], None]
 
 
 class Agent:
@@ -40,16 +40,17 @@ class Agent:
         self.max_turns = max_turns
         self.prepare_next_turn = prepare_next_turn
         self.should_stop_after_turn = should_stop_after_turn
-        self._listeners: set[AgentListener] = set()
+        self._listeners: set[AgentRunListener] = set()
 
     def subscribe(
         self,
-        listener: AgentListener,
+        listener: AgentRunListener,
     ) -> Callable[[], None]:
         self._listeners.add(listener)
         return lambda: self._listeners.discard(listener)
 
     async def prompt(self, text: str) -> None:
+        """处理一次用户提示，运行 Agent Loop 并持续更新状态。"""
         if self.state.is_streaming:
             raise RuntimeError("Agent is already processing a prompt")
 
@@ -93,7 +94,7 @@ class Agent:
             self.state.streaming_message = None
             self.state.pending_tool_calls.clear()
 
-    def _process_event(self, event: AgentEvent) -> None:
+    def _process_event(self, event: AgentRunEvent) -> None:
         if isinstance(event, MessageStartEvent | MessageUpdateEvent):
             self.state.streaming_message = event.message
         elif isinstance(event, MessageEndEvent):
