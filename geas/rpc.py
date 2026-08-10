@@ -36,6 +36,12 @@ from geas.core.types import (
     ToolExecutionStartEvent,
 )
 from geas.mcp import MCPRegistry, create_mcp_call_tool
+from geas.plan_agent.planwise import (
+    PLANWISE_SERVER_NAME,
+    PlanWiseAuth,
+    login_planwise,
+    publish_plan,
+)
 from geas.plan_agent.profiles import load_skill_profiles
 from geas.plan_agent.session import (
     PLAN_AGENT_MAX_TURNS,
@@ -44,11 +50,6 @@ from geas.plan_agent.session import (
 )
 from geas.plan_agent.session_manager import SessionManager
 from geas.plan_agent.types import Phase, Plan
-from geas.actions.publish_plan import (
-    PLANWISE_SERVER_NAME,
-    publish_plan,
-)
-from geas.actions.planwise_auth import PlanWiseAuth, login_planwise
 
 
 _PLAN = TypeAdapter(Plan)

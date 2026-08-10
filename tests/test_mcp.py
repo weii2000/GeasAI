@@ -3,7 +3,7 @@ from datetime import datetime
 from types import SimpleNamespace
 
 import geas.mcp
-import geas.actions.planwise_auth
+import geas.plan_agent.planwise
 import httpx2
 from geas.mcp import (
     MCPRegistry,
@@ -11,8 +11,7 @@ from geas.mcp import (
     create_mcp_call_tool,
 )
 from geas.plan_agent.types import Plan, Task
-from geas.actions.publish_plan import publish_plan
-from geas.actions.planwise_auth import login_planwise
+from geas.plan_agent.planwise import login_planwise, publish_plan
 from mcp.types import TextContent
 
 
@@ -197,7 +196,7 @@ def test_planwise_login_returns_access_token(monkeypatch) -> None:
     client_type = httpx2.AsyncClient
     transport = httpx2.MockTransport(handle)
     monkeypatch.setattr(
-        geas.actions.planwise_auth.httpx2,
+        geas.plan_agent.planwise.httpx2,
         "AsyncClient",
         lambda **options: client_type(transport=transport, **options),
     )
