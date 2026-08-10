@@ -61,6 +61,17 @@ def test_plan_session_runs_plan_review_to_idle() -> None:
                         },
                     ),
                     make_tool_call("submit_plan", {}),
+                    make_tool_call(
+                        "update_plan",
+                        {
+                            "title": "不应执行",
+                            "goal": "不应执行",
+                            "description": "不应执行",
+                            "acceptance_criterion": "不应执行",
+                            "constraints": [],
+                            "tasks": [],
+                        },
+                    ),
                 ],
                 "toolUse",
             ),
@@ -80,6 +91,7 @@ def test_plan_session_runs_plan_review_to_idle() -> None:
                         },
                     ),
                     make_tool_call("approve_plan", {}),
+                    make_tool_call("request_change", {}),
                 ],
                 "toolUse",
             ),
@@ -99,6 +111,19 @@ def test_plan_session_runs_plan_review_to_idle() -> None:
     assert session.review_report == ReviewReport(
         summary="计划可以执行",
     )
+    skipped_tools = {
+        message.tool_name
+        for message in (
+            session.plan_agent.state.messages
+            + session.review_agent.state.messages
+        )
+        if (
+            isinstance(message, ToolResultMessage)
+            and message.is_error
+            and "agent run was stopped" in message.content[0].text
+        )
+    }
+    assert skipped_tools == {"update_plan", "request_change"}
     assert len(plan_model.contexts) == 2
     assert len(review_model.contexts) == 1
     plan_prompt = plan_model.contexts[0].system_prompt

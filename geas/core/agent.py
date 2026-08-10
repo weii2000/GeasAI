@@ -7,14 +7,13 @@ from geas.ai.types import UserMessage
 from .agent_loop import agent_loop
 from .types import (
     AgentContext,
+    AgentHooks,
     AgentRunEvent,
     AgentLoopConfig,
     AgentState,
     MessageEndEvent,
     MessageStartEvent,
     MessageUpdateEvent,
-    PrepareNextTurn,
-    ShouldStopAfterTurn,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
     TurnEndEvent,
@@ -29,8 +28,7 @@ class Agent:
         state: AgentState,
         stream_function: StreamFunction,
         max_turns: int,
-        prepare_next_turn: PrepareNextTurn | None = None,
-        should_stop_after_turn: ShouldStopAfterTurn | None = None,
+        hooks: AgentHooks | None = None,
     ) -> None:
         if max_turns < 1:
             raise ValueError("max_turns must be at least 1")
@@ -38,8 +36,7 @@ class Agent:
         self.state = state
         self._stream_function = stream_function
         self.max_turns = max_turns
-        self.prepare_next_turn = prepare_next_turn
-        self.should_stop_after_turn = should_stop_after_turn
+        self.hooks = hooks if hooks is not None else AgentHooks()
         self._listeners: set[AgentRunListener] = set()
 
     def subscribe(
@@ -74,8 +71,7 @@ class Agent:
                 context=context,
                 config=AgentLoopConfig(
                     model=self.state.model,
-                    prepare_next_turn=self.prepare_next_turn,
-                    should_stop_after_turn=self.should_stop_after_turn,
+                    hooks=self.hooks,
                 ),
                 stream_function=self._stream_function,
                 max_turns=self.max_turns,

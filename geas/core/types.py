@@ -10,6 +10,7 @@ from geas.ai.types import (
     Model,
     TextContent,
     Tool,
+    ToolCall,
     ToolResultMessage,
 )
 
@@ -38,15 +39,33 @@ class AgentContext:
     tools: list[AgentTool] = field(default_factory=list)
 
 
-type PrepareNextTurn = Callable[
+type BeforeTurnHook = Callable[
     [AgentContext],
-    Awaitable[AgentContext | None],
+    Awaitable[AgentContext],
 ]
 
-type ShouldStopAfterTurn = Callable[
+type BeforeToolCallHook = Callable[
+    [ToolCall],
+    Awaitable[bool],
+]
+
+type AfterToolCallHook = Callable[
+    ["ToolExecutionEndEvent"],
+    Awaitable[bool],
+]
+
+type AfterTurnHook = Callable[
     ["TurnEndEvent"],
     Awaitable[bool],
 ]
+
+
+@dataclass
+class AgentHooks:
+    before_turn: list[BeforeTurnHook] = field(default_factory=list)
+    after_turn: list[AfterTurnHook] = field(default_factory=list)
+    before_tool_call: list[BeforeToolCallHook] = field(default_factory=list)
+    after_tool_call: list[AfterToolCallHook] = field(default_factory=list)
 
 
 @dataclass
@@ -64,8 +83,7 @@ class AgentState:
 @dataclass
 class AgentLoopConfig:
     model: Model
-    prepare_next_turn: PrepareNextTurn | None = None
-    should_stop_after_turn: ShouldStopAfterTurn | None = None
+    hooks: AgentHooks = field(default_factory=AgentHooks)
 
 
 @dataclass

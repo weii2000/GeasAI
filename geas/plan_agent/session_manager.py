@@ -12,7 +12,7 @@ from geas.ai.types import AssistantMessage, Message
 from geas.core.agent import Agent
 from geas.core.types import AgentState, AgentTool
 
-from .profiles import load_skill_profiles
+from .profiles import BASE_PROFILE, load_skill_profiles
 from .session import (
     PLAN_AGENT_MAX_TURNS,
     REVIEW_AGENT_MAX_TURNS,
@@ -152,7 +152,7 @@ class SessionManager:
         profile_args = (
             load_skill_profiles(skills_root)
             if skills_root is not None
-            else ()
+            else (None, BASE_PROFILE, None)
         )
         session = PlanSession(
             _restore_agent(

@@ -12,11 +12,25 @@ from geas.ai.apis.openai_completions import (
 )
 from geas.ai.providers import builtin_models
 from geas.ai.providers.deepseek import DEEPSEEK_MODELS
-from geas.ai.types import Context, ResponseErrorEvent, ThinkingContent
+from geas.ai.types import (
+    Context,
+    ResponseErrorEvent,
+    TextContent,
+    ThinkingContent,
+    ToolCall,
+)
 from geas.core.agent import Agent
-from geas.core.types import AgentState
+from geas.core.types import (
+    AgentContext,
+    AgentHooks,
+    AgentState,
+    AgentTool,
+    AgentToolResult,
+    ToolExecutionEndEvent,
+    TurnEndEvent,
+)
 
-from .helpers import make_assistant, make_tool_call
+from .helpers import ScriptedModel, make_assistant, make_tool_call
 
 
 def test_builtin_models_registers_catalogs() -> None:
@@ -82,6 +96,89 @@ def test_reasoning_delta_uses_first_non_empty_field() -> None:
     )
 
     assert _reasoning_delta(delta) == ("reasoning", "thinking")
+
+
+def test_agent_hooks_run_in_lifecycle_and_registration_order() -> None:
+    calls: list[str] = []
+
+    async def before_turn_one(context: AgentContext) -> AgentContext:
+        calls.append("before_turn_one")
+        return context
+
+    async def before_turn_two(context: AgentContext) -> AgentContext:
+        calls.append("before_turn_two")
+        return context
+
+    async def before_tool_call(_tool_call: ToolCall) -> bool:
+        calls.append("before_tool_call")
+        return False
+
+    async def execute_tool(
+        _tool_call_id: str,
+        _args: dict[str, object],
+    ) -> AgentToolResult:
+        calls.append("execute_tool")
+        return AgentToolResult(
+            content=[TextContent(type="text", text="done")]
+        )
+
+    async def after_tool_call(
+        _event: ToolExecutionEndEvent,
+    ) -> bool:
+        calls.append("after_tool_call")
+        return False
+
+    async def after_turn(_event: TurnEndEvent) -> bool:
+        calls.append("after_turn")
+        return False
+
+    stream = ScriptedModel(
+        [
+            make_assistant(
+                [make_tool_call("example_tool", {})],
+                "toolUse",
+            ),
+            make_assistant(
+                [TextContent(type="text", text="finished")],
+                "stop",
+            ),
+        ]
+    )
+    agent = Agent(
+        state=AgentState(
+            model=DEEPSEEK_MODELS[0],
+            tools=[
+                AgentTool(
+                    name="example_tool",
+                    description="Example tool",
+                    parameters={"type": "object"},
+                    execute=execute_tool,
+                )
+            ],
+        ),
+        stream_function=stream,
+        max_turns=2,
+        hooks=AgentHooks(
+            before_turn=[before_turn_one, before_turn_two],
+            after_turn=[after_turn],
+            before_tool_call=[before_tool_call],
+            after_tool_call=[after_tool_call],
+        ),
+    )
+
+    asyncio.run(agent.prompt("run"))
+
+    assert calls == [
+        "before_turn_one",
+        "before_turn_two",
+        "before_tool_call",
+        "execute_tool",
+        "after_tool_call",
+        "after_turn",
+        "before_turn_one",
+        "before_turn_two",
+        "after_turn",
+    ]
 
 
 def test_failed_response_is_reported_and_not_replayed() -> None:

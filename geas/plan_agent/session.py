@@ -10,7 +10,7 @@ from geas.core.types import (
     AgentRunEvent,
     AgentTool,
     MessageEndEvent,
-    TurnEndEvent,
+    ToolExecutionEndEvent,
 )
 
 from .profiles import BASE_PROFILE, PHASE_PROFILES, Profile
@@ -69,17 +69,17 @@ class PlanSession:
                 raise ValueError(f'Duplicate tool: "{tool.name}"')
             self._tools[tool.name] = tool
             self._extra_tool_names.append(tool.name)
-        self.plan_agent.prepare_next_turn = (
-            self._prepare_plan_next_turn
+        self.plan_agent.hooks.before_turn.append(
+            self._prepare_plan_turn
         )
-        self.review_agent.prepare_next_turn = (
-            self._prepare_review_next_turn
+        self.plan_agent.hooks.after_tool_call.append(
+            self._stop_plan_run
         )
-        self.plan_agent.should_stop_after_turn = (
-            self._stop_plan_after_turn
+        self.review_agent.hooks.before_turn.append(
+            self._prepare_review_turn
         )
-        self.review_agent.should_stop_after_turn = (
-            self._stop_review_after_turn
+        self.review_agent.hooks.after_tool_call.append(
+            self._stop_review_run
         )
         self.plan_agent.subscribe(
             lambda event: self._record_assistant_text(
@@ -204,27 +204,27 @@ class PlanSession:
         )
         return "\n\n".join(section for section in sections if section)
 
-    async def _prepare_plan_next_turn(
+    async def _prepare_plan_turn(
         self,
         context: AgentContext,
     ) -> AgentContext:
-        return self._prepare_next_turn(
+        return self._prepare_turn(
             self.plan_agent,
             Phase.PLAN,
             context,
         )
 
-    async def _prepare_review_next_turn(
+    async def _prepare_review_turn(
         self,
         context: AgentContext,
     ) -> AgentContext:
-        return self._prepare_next_turn(
+        return self._prepare_turn(
             self.review_agent,
             Phase.REVIEW,
             context,
         )
 
-    def _prepare_next_turn(
+    def _prepare_turn(
         self,
         agent: Agent,
         phase: Phase,
@@ -237,15 +237,15 @@ class PlanSession:
             tools=[*agent.state.tools],
         )
 
-    async def _stop_plan_after_turn(
+    async def _stop_plan_run(
         self,
-        _event: TurnEndEvent,
+        _event: ToolExecutionEndEvent,
     ) -> bool:
         return self.phase is not Phase.PLAN
 
-    async def _stop_review_after_turn(
+    async def _stop_review_run(
         self,
-        _event: TurnEndEvent,
+        _event: ToolExecutionEndEvent,
     ) -> bool:
         return self.phase is not Phase.REVIEW
 

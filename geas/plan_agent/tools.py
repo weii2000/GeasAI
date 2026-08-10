@@ -5,7 +5,7 @@ import json
 import os
 import signal
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from ddgs import DDGS
 from pydantic import TypeAdapter
@@ -188,7 +188,7 @@ def create_plan_agent_tools(session: PlanSession) -> list[AgentTool]:
         results = await asyncio.to_thread(
             DDGS().text,
             str(args["query"]),
-            max_results=int(args.get("max_results", 5)),
+            max_results=int(cast(int, args.get("max_results", 5))),
         )
         return _result(json.dumps(results, ensure_ascii=False))
 
@@ -233,7 +233,7 @@ def create_plan_agent_tools(session: PlanSession) -> list[AgentTool]:
                 await process.wait()
 
         timeout = (
-            float(args["timeout"])
+            float(cast(int | float, args["timeout"]))
             if "timeout" in args
             else None
         )

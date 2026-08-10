@@ -156,6 +156,47 @@ def _create_truncated_tool_result(
     )
 
 
+def _append_skipped_tool_results(
+    output: AgentRunStream,
+    tool_calls: list[ToolCall],
+    current_messages: list[Message],
+    new_messages: list[Message],
+    tool_results: list[ToolResultMessage],
+) -> None:
+    for tool_call in tool_calls:
+        tool_result = ToolResultMessage(
+            role="toolResult",
+            tool_call_id=tool_call.id,
+            tool_name=tool_call.name,
+            content=[
+                TextContent(
+                    type="text",
+                    text=(
+                        f'Tool call "{tool_call.name}" was not executed '
+                        "because the agent run was stopped."
+                    ),
+                )
+            ],
+            is_error=True,
+            timestamp=int(time.time() * 1000),
+        )
+        current_messages.append(tool_result)
+        new_messages.append(tool_result)
+        tool_results.append(tool_result)
+        output.push(
+            MessageStartEvent(
+                type="message_start",
+                message=tool_result,
+            )
+        )
+        output.push(
+            MessageEndEvent(
+                type="message_end",
+                message=tool_result,
+            )
+        )
+
+
 async def _run_agent_loop(
     output: AgentRunStream,
     prompts: list[Message],
@@ -189,6 +230,15 @@ async def _run_agent_loop(
             first_turn = False
         else:
             output.push(TurnStartEvent(type="turn_start"))
+
+        context = AgentContext(
+            messages=[*current_messages],
+            system_prompt=context.system_prompt,
+            tools=[*context.tools],
+        )
+        for handler in config.hooks.before_turn:
+            context = await handler(context)
+        current_messages = [*context.messages]
 
         ai_context = Context(
             messages=[*current_messages],
@@ -241,8 +291,24 @@ async def _run_agent_loop(
                 if isinstance(block, ToolCall)
             ]
         tool_results: list[ToolResultMessage] = []
+        stop_run = False
 
-        for tool_call in tool_calls:
+        for index, tool_call in enumerate(tool_calls):
+            for handler in config.hooks.before_tool_call:
+                if await handler(tool_call):
+                    stop_run = True
+                    break
+
+            if stop_run:
+                _append_skipped_tool_results(
+                    output,
+                    tool_calls[index:],
+                    current_messages,
+                    new_messages,
+                    tool_results,
+                )
+                break
+
             output.push(
                 ToolExecutionStartEvent(
                     type="tool_execution_start",
@@ -261,15 +327,14 @@ async def _run_agent_loop(
                     context.tools,
                 )
 
-            output.push(
-                ToolExecutionEndEvent(
-                    type="tool_execution_end",
-                    tool_call_id=tool_call.id,
-                    tool_name=tool_call.name,
-                    result=result,
-                    is_error=is_error,
-                )
+            tool_end = ToolExecutionEndEvent(
+                type="tool_execution_end",
+                tool_call_id=tool_call.id,
+                tool_name=tool_call.name,
+                result=result,
+                is_error=is_error,
             )
+            output.push(tool_end)
             tool_result = ToolResultMessage(
                 role="toolResult",
                 tool_call_id=tool_call.id,
@@ -295,6 +360,21 @@ async def _run_agent_loop(
                 )
             )
 
+            for handler in config.hooks.after_tool_call:
+                if await handler(tool_end):
+                    stop_run = True
+                    break
+
+            if stop_run:
+                _append_skipped_tool_results(
+                    output,
+                    tool_calls[index + 1 :],
+                    current_messages,
+                    new_messages,
+                    tool_results,
+                )
+                break
+
         turn_end = TurnEndEvent(
             type="turn_end",
             message=assistant_message,
@@ -302,25 +382,12 @@ async def _run_agent_loop(
         )
         output.push(turn_end)
 
-        if (
-            config.should_stop_after_turn is not None
-            and await config.should_stop_after_turn(turn_end)
-        ):
-            break
+        for handler in config.hooks.after_turn:
+            if await handler(turn_end):
+                stop_run = True
+                break
 
-        if config.prepare_next_turn is not None:
-            next_context = await config.prepare_next_turn(
-                AgentContext(
-                    messages=current_messages,
-                    system_prompt=context.system_prompt,
-                    tools=[*context.tools],
-                )
-            )
-            if next_context is not None:
-                context = next_context
-                current_messages = [*next_context.messages]
-
-        if not tool_calls:
+        if stop_run or not tool_calls:
             break
 
     output.push(
