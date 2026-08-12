@@ -287,6 +287,19 @@ def test_state_transitions_require_the_expected_phase() -> None:
         session.approve_plan()
 
 
+def test_resubmitting_plan_clears_stale_review_history() -> None:
+    session, _plan_model, _review_model = make_session([])
+    session.submit_plan()
+    session.review_agent.state.messages.append(
+        UserMessage(role="user", content="旧评审", timestamp=0)
+    )
+
+    session.request_change()
+    session.submit_plan()
+
+    assert session.review_agent.state.messages == []
+
+
 def test_task_tree_rejects_skipped_levels() -> None:
     with pytest.raises(
         ValueError,

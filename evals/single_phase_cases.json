@@ -1,10 +1,10 @@
 {
   "name": "geas-single-phase",
-  "version": "0.2",
+  "version": "0.4",
   "cases": [
     {
       "case_id": "plan_ambiguous_goal_clarifies",
-      "description": "模糊目标应只追问一个关键问题。",
+      "description": "模糊目标应追问少量关键问题。",
       "target": "plan",
       "input": {
         "prompt": "我想学 Python，帮我做个计划。"
@@ -13,7 +13,9 @@
         "phase": "plan",
         "require_plan_unchanged": true,
         "min_question_count": 1,
-        "max_question_count": 3
+        "max_question_count": 3,
+        "forbidden_tools": ["update_plan", "submit_plan", "web_search"],
+        "require_no_tool_errors": true
       }
     },
     {
@@ -30,11 +32,41 @@
         "max_task_count": 40,
         "min_top_level_task_count": 4,
         "max_top_level_task_count": 8,
+        "required_tools": ["update_plan", "submit_plan"],
+        "forbidden_tools": ["web_search"],
+        "require_no_tool_errors": true,
         "required_constraint_terms": [
           ["四周", "4周"],
           ["每天", "每日", "每个工作日"],
           ["最多", "不超过", "至多"],
           ["1小时", "一小时", "一个小时"]
+        ]
+      }
+    },
+    {
+      "case_id": "plan_running_goal_submits",
+      "description": "信息完整的非软件目标也应直接生成计划并提交评审。",
+      "target": "plan",
+      "input": {
+        "prompt": "请制定一个 6 周的 10 公里跑步训练计划。我目前能连续跑 5 公里，用时约 35 分钟；每周最多训练 4 天，除最终 10 公里测试外每次不超过 60 分钟，目标是完成 10 公里且不受伤。请直接给出可执行计划。"
+      },
+      "expected": {
+        "phase": "review",
+        "require_complete_plan": true,
+        "min_task_count": 4,
+        "max_task_count": 35,
+        "required_tools": ["update_plan", "submit_plan"],
+        "forbidden_tools": ["web_search"],
+        "require_no_tool_errors": true,
+        "required_plan_terms": [
+          ["10公里", "十公里"],
+          ["受伤", "伤病", "安全"]
+        ],
+        "required_constraint_terms": [
+          ["6周", "六周"],
+          ["每周", "一周"],
+          ["4天", "四天"],
+          ["60分钟", "一小时", "1小时"]
         ]
       }
     },
@@ -77,6 +109,9 @@
         "require_complete_plan": true,
         "min_task_count": 3,
         "max_task_count": 20,
+        "required_tools": ["update_plan", "submit_plan"],
+        "forbidden_tools": ["web_search"],
+        "require_no_tool_errors": true,
         "required_plan_terms": [
           ["测试", "pytest"],
           ["JWT", "登录", "认证"]
@@ -120,8 +155,11 @@
         }
       },
       "expected": {
-        "phase": "idle",
-        "require_complete_review_report": true
+        "phase": "pending_approval",
+        "require_complete_review_report": true,
+        "required_tools": ["update_review_report", "approve_plan"],
+        "forbidden_tools": ["request_change", "web_search"],
+        "require_no_tool_errors": true
       }
     },
     {
@@ -153,8 +191,56 @@
         "require_complete_review_report": true,
         "min_issue_count": 1,
         "minimum_issue_severity": "blocking",
+        "required_tools": ["update_review_report", "request_change"],
+        "forbidden_tools": ["approve_plan", "web_search"],
+        "require_no_tool_errors": true,
         "required_issue_terms": [
           ["验收", "完成标准", "验证"]
+        ]
+      }
+    },
+    {
+      "case_id": "review_routes_user_feedback_to_plan",
+      "description": "用户在评审阶段提出修改意见时应退回规划阶段。",
+      "target": "review",
+      "input": {
+        "prompt": "这个计划我想改一下：总周期缩短为两周，并把部署到 Render 后可访问作为验收条件。请根据这些意见处理。",
+        "plan": {
+          "title": "FastAPI 任务管理 API",
+          "goal": "四周内完成可部署的 FastAPI 任务管理 API",
+          "description": "实现认证、任务 CRUD、自动化测试和部署文档。",
+          "acceptance_criterion": "认证和 CRUD 测试全部通过。",
+          "constraints": ["四周内完成"],
+          "tasks": [
+            {
+              "title": "设计数据库模型和 API 契约",
+              "level": 1
+            },
+            {
+              "title": "实现认证和任务 CRUD",
+              "level": 1
+            },
+            {
+              "title": "编写自动化测试",
+              "level": 1
+            },
+            {
+              "title": "补充部署文档",
+              "level": 1
+            }
+          ]
+        }
+      },
+      "expected": {
+        "phase": "plan",
+        "require_complete_review_report": true,
+        "min_issue_count": 1,
+        "required_tools": ["update_review_report", "request_change"],
+        "forbidden_tools": ["approve_plan", "web_search"],
+        "require_no_tool_errors": true,
+        "required_issue_terms": [
+          ["两周", "2周"],
+          ["Render", "部署"]
         ]
       }
     },
@@ -187,6 +273,9 @@
         "require_complete_review_report": true,
         "min_issue_count": 1,
         "minimum_issue_severity": "blocking",
+        "required_tools": ["update_review_report", "request_change"],
+        "forbidden_tools": ["approve_plan", "web_search"],
+        "require_no_tool_errors": true,
         "required_issue_terms": [
           ["1小时", "一小时", "时间限制", "时间约束"],
           ["冲突", "超过", "超出", "违反", "不满足"]

@@ -14,7 +14,14 @@ from pydantic import TypeAdapter
 
 from geas.ai.model_registry import ModelRegistry
 from geas.ai.providers import builtin_models
-from geas.ai.types import AssistantMessage, Model, TextContent, Usage
+from geas.ai.types import (
+    AssistantMessage,
+    Model,
+    TextContent,
+    ToolCall,
+    ToolResultMessage,
+    Usage,
+)
 from geas.config import (
     ModelSelection,
     load_model_selection,
@@ -53,6 +60,9 @@ class Expectation:
     max_top_level_task_count: int | None = None
     min_question_count: int | None = None
     max_question_count: int | None = None
+    required_tools: list[str] = field(default_factory=list)
+    forbidden_tools: list[str] = field(default_factory=list)
+    require_no_tool_errors: bool = False
     require_complete_review_report: bool = False
     min_issue_count: int = 0
     minimum_issue_severity: IssueSeverity | None = None
@@ -84,6 +94,14 @@ class EvalSuite:
     name: str
     version: str
     cases: list[EvalCase]
+
+
+@dataclass(frozen=True)
+class EvalOutput:
+    phase: Phase
+    plan: Plan
+    review_report: ReviewReport | None
+    assistant_text: str
 
 
 @dataclass(frozen=True)
@@ -179,23 +197,86 @@ def _score(
     session: PlanSession,
     assistant_text: str,
 ) -> list[Check]:
+    checks = score_output(
+        case,
+        EvalOutput(
+            phase=session.phase,
+            plan=session.plan,
+            review_report=session.review_report,
+            assistant_text=assistant_text,
+        ),
+    )
+    expected = case.expected
+    agent = (
+        session.plan_agent
+        if case.target == "plan"
+        else session.review_agent
+    )
+    called_tools = {
+        block.name
+        for message in agent.state.messages
+        if isinstance(message, AssistantMessage)
+        for block in message.content
+        if isinstance(block, ToolCall)
+    }
+    successful_tools = {
+        message.tool_name
+        for message in agent.state.messages
+        if isinstance(message, ToolResultMessage) and not message.is_error
+    }
+    tool_errors = [
+        message.tool_name
+        for message in agent.state.messages
+        if isinstance(message, ToolResultMessage) and message.is_error
+    ]
+
+    if expected.required_tools:
+        missing = set(expected.required_tools) - successful_tools
+        checks.append(Check(
+            "required_tools",
+            not missing,
+            f"missing={sorted(missing)}",
+        ))
+
+    if expected.forbidden_tools:
+        unexpected = called_tools & set(expected.forbidden_tools)
+        checks.append(Check(
+            "forbidden_tools",
+            not unexpected,
+            f"unexpected={sorted(unexpected)}",
+        ))
+
+    if expected.require_no_tool_errors:
+        checks.append(Check(
+            "no_tool_errors",
+            not tool_errors,
+            f"errors={tool_errors}",
+        ))
+
+    return checks
+
+
+def score_output(
+    case: EvalCase,
+    output: EvalOutput,
+) -> list[Check]:
     expected = case.expected
     checks = [
         Check(
             "phase",
-            session.phase is expected.phase,
-            f"actual={session.phase}; expected={expected.phase}",
+            output.phase is expected.phase,
+            f"actual={output.phase}; expected={expected.phase}",
         )
     ]
 
     if expected.require_complete_plan:
         complete = all(
             (
-                session.plan.title.strip(),
-                session.plan.goal.strip(),
-                session.plan.description.strip(),
-                session.plan.acceptance_criterion.strip(),
-                session.plan.tasks,
+                output.plan.title.strip(),
+                output.plan.goal.strip(),
+                output.plan.description.strip(),
+                output.plan.acceptance_criterion.strip(),
+                output.plan.tasks,
             )
         )
         checks.append(Check("complete_plan", bool(complete), "all fields"))
@@ -203,12 +284,12 @@ def _score(
     if expected.require_plan_unchanged:
         checks.append(Check(
             "plan_unchanged",
-            session.plan == case.input.plan,
+            output.plan == case.input.plan,
             "plan must not change before clarification",
         ))
 
-    task_count = _task_count(session.plan.tasks)
-    top_level_task_count = len(session.plan.tasks)
+    task_count = _task_count(output.plan.tasks)
+    top_level_task_count = len(output.plan.tasks)
     if expected.min_task_count:
         checks.append(Check(
             "minimum_task_count",
@@ -241,7 +322,8 @@ def _score(
         ))
 
     question_count = (
-        assistant_text.count("?") + assistant_text.count("？")
+        output.assistant_text.count("?")
+        + output.assistant_text.count("？")
     )
     if expected.min_question_count is not None:
         checks.append(Check(
@@ -266,7 +348,7 @@ def _score(
         checks.append(_term_check(
             "plan_terms",
             json.dumps(
-                asdict(session.plan),
+                asdict(output.plan),
                 ensure_ascii=False,
                 default=_json_default,
             ),
@@ -276,17 +358,17 @@ def _score(
     if expected.required_constraint_terms:
         checks.append(_term_check(
             "constraint_terms",
-            json.dumps(session.plan.constraints, ensure_ascii=False),
+            json.dumps(output.plan.constraints, ensure_ascii=False),
             expected.required_constraint_terms,
         ))
 
     issues = (
-        session.review_report.issues
-        if session.review_report is not None
+        output.review_report.issues
+        if output.review_report is not None
         else []
     )
     if expected.require_complete_review_report:
-        report = session.review_report
+        report = output.review_report
         complete_report = (
             report is not None
             and bool(report.summary.strip())

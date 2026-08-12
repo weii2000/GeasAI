@@ -275,7 +275,11 @@ def _apply_usage(
     usage: CompletionUsage,
     model: Model,
 ) -> None:
-    cache_read = getattr(usage, "prompt_cache_hit_tokens", 0) or 0
+    cache_read = (
+        getattr(usage, "cached_tokens", 0)
+        or getattr(usage, "prompt_cache_hit_tokens", 0)
+        or 0
+    )
     input_tokens = usage.prompt_tokens - cache_read
     output_tokens = usage.completion_tokens
 

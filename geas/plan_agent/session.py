@@ -99,6 +99,7 @@ class PlanSession:
     def submit_plan(self) -> None:
         if self.phase is not Phase.PLAN:
             raise ValueError("Plan can only be submitted in PLAN phase")
+        self.review_agent.state.messages.clear()
         self.review_report = None
         self.phase = Phase.REVIEW
 
