@@ -11,15 +11,16 @@ from time import perf_counter
 
 from pydantic import TypeAdapter
 
-from geas.plan_agent.profiles import (
+from apps.blueprint.profiles import (
     BASE_PROMPT,
     PLAN_PROMPT,
     REVIEW_PROMPT,
 )
-from geas.plan_agent.types import Phase
+from apps.blueprint.types import Phase
 
 from .single_phase import (
     DEFAULT_SUITE_PATH,
+    EVAL_RESULTS_ROOT,
     Check,
     EvalCase,
     EvalOutput,
@@ -29,7 +30,7 @@ from .single_phase import (
 )
 
 
-DEFAULT_OUTPUT_DIR = Path("eval-results/comparison/codex")
+DEFAULT_OUTPUT_DIR = EVAL_RESULTS_ROOT / "comparison" / "codex"
 _OUTPUT = TypeAdapter(EvalOutput)
 type TokenUsage = dict[str, int]
 

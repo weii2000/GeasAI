@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 import httpx2
 
 from geas.ai.types import TextContent
-from geas.mcp import MCPRegistry
+from geas.integrations.mcp import MCPRegistry
 
 from .types import Plan, Task
 

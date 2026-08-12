@@ -5,14 +5,13 @@ from pathlib import Path
 
 
 def main() -> int:
-    tui_directory = Path(__file__).parent / "tui"
     environment = os.environ | {"GEAS_PYTHON": sys.executable}
     return subprocess.run(
         [
             "npm",
             "--silent",
             "--prefix",
-            str(tui_directory),
+            str(Path(__file__).with_name("tui")),
             "run",
             "start",
         ],

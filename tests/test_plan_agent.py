@@ -12,8 +12,8 @@ from geas.ai.types import (
     ToolResultMessage,
     UserMessage,
 )
-from geas.plan_agent.session_manager import SessionManager
-from geas.plan_agent.types import (
+from apps.blueprint.session_manager import SessionManager
+from apps.blueprint.types import (
     ConversationMessage,
     IssueSeverity,
     Phase,

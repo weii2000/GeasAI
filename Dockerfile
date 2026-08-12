@@ -9,6 +9,6 @@ WORKDIR /app
 COPY . .
 
 RUN uv sync --locked --no-dev
-RUN npm --prefix tui ci
+RUN npm --prefix apps/blueprint/tui ci
 
-CMD ["/app/.venv/bin/python", "main.py"]
+CMD ["/app/.venv/bin/python", "-m", "apps.blueprint.main"]

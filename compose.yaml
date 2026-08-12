@@ -2,11 +2,11 @@ services:
   geas:
     build: .
     image: geas:dev
-    env_file: .env
+    env_file: apps/blueprint/.env
     stdin_open: true
     tty: true
     volumes:
-      - ./skills:/app/skills:ro
+      - ./apps/blueprint/skills:/app/apps/blueprint/skills:ro
       - geas-data:/root/.geas
 
 volumes:

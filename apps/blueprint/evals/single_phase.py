@@ -22,19 +22,19 @@ from geas.ai.types import (
     ToolResultMessage,
     Usage,
 )
-from geas.config import (
+from apps.blueprint.config import (
     ModelSelection,
     load_model_selection,
     load_project_env,
 )
 from geas.core.agent import Agent
 from geas.core.types import AgentState
-from geas.plan_agent.session import (
+from apps.blueprint.session import (
     PLAN_AGENT_MAX_TURNS,
     REVIEW_AGENT_MAX_TURNS,
     PlanSession,
 )
-from geas.plan_agent.types import (
+from apps.blueprint.types import (
     IssueSeverity,
     Phase,
     Plan,
@@ -45,7 +45,10 @@ from geas.plan_agent.types import (
 DEFAULT_SUITE_PATH = Path(__file__).with_name(
     "single_phase_cases.json"
 )
-DEFAULT_OUTPUT_DIR = Path("eval-results/single-phase")
+EVAL_RESULTS_ROOT = (
+    Path(__file__).resolve().parents[3] / "eval-results" / "blueprint"
+)
+DEFAULT_OUTPUT_DIR = EVAL_RESULTS_ROOT / "single-phase"
 type EvalTarget = Literal["plan", "review"]
 
 
@@ -649,7 +652,7 @@ def _json_default(value: object) -> str:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run one Plan Agent phase against real models."
+        description="Run one Blueprint phase against real models."
     )
     parser.add_argument("--suite", type=Path, default=DEFAULT_SUITE_PATH)
     parser.add_argument("--case", action="append", dest="case_ids")

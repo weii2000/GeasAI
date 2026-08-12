@@ -16,7 +16,7 @@ from geas.ai.types import (
     TextContent,
     TextDeltaEvent,
 )
-from geas.config import (
+from apps.blueprint.config import (
     AgentPhaseName,
     ModelSelection,
     load_mcp_servers,
@@ -35,21 +35,21 @@ from geas.core.types import (
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
 )
-from geas.mcp import MCPRegistry, create_mcp_call_tool
-from geas.plan_agent.planwise import (
+from geas.integrations.mcp import MCPRegistry, create_mcp_call_tool
+from apps.blueprint.planwise import (
     PLANWISE_SERVER_NAME,
     PlanWiseAuth,
     login_planwise,
     publish_plan,
 )
-from geas.plan_agent.profiles import load_skill_profiles
-from geas.plan_agent.session import (
+from apps.blueprint.profiles import load_skill_profiles
+from apps.blueprint.session import (
     PLAN_AGENT_MAX_TURNS,
     REVIEW_AGENT_MAX_TURNS,
     PlanSession,
 )
-from geas.plan_agent.session_manager import SessionManager
-from geas.plan_agent.types import Phase, Plan
+from apps.blueprint.session_manager import SessionManager
+from apps.blueprint.types import Phase, Plan
 
 
 _PLAN = TypeAdapter(Plan)
@@ -454,7 +454,7 @@ async def main() -> None:
     models = builtin_models()
     servers = load_mcp_servers()
     async with MCPRegistry(servers) as registry:
-        server = RPCServer(models, registry, Path.cwd() / "skills")
+        server = RPCServer(models, registry, Path(__file__).with_name("skills"))
         try:
             await _serve(server)
         finally:

@@ -10,6 +10,8 @@ dependencies = [
     "pyyaml>=6.0.3",
     "python-dotenv>=1.2.2",
     "mcp>=2,<3",
+    "fastapi>=0.141.1",
+    "uvicorn>=0.52.0",
 ]
 
 [dependency-groups]

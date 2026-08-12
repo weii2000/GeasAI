@@ -3,5 +3,7 @@ __pycache__/
 *.py[cod]
 .env
 .DS_Store
+xcuserdata/
+*.xcuserstate
 eval-results/
-/tui/node_modules/
+/apps/blueprint/tui/node_modules/

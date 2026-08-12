@@ -2,16 +2,16 @@ import asyncio
 from datetime import datetime
 from types import SimpleNamespace
 
-import geas.mcp
-import geas.plan_agent.planwise
+import apps.blueprint.planwise
+import geas.integrations.mcp
 import httpx2
-from geas.mcp import (
+from geas.integrations.mcp import (
     MCPRegistry,
     MCPServerConfig,
     create_mcp_call_tool,
 )
-from geas.plan_agent.types import Plan, Task
-from geas.plan_agent.planwise import login_planwise, publish_plan
+from apps.blueprint.planwise import login_planwise, publish_plan
+from apps.blueprint.types import Plan, Task
 from mcp.types import TextContent
 
 
@@ -57,13 +57,17 @@ def test_mcp_connects_lazily_and_reuses_client(monkeypatch) -> None:
                 is_error=False,
             )
 
-    monkeypatch.setattr(geas.mcp.httpx2, "AsyncClient", FakeHTTPClient)
     monkeypatch.setattr(
-        geas.mcp,
+        geas.integrations.mcp.httpx2,
+        "AsyncClient",
+        FakeHTTPClient,
+    )
+    monkeypatch.setattr(
+        geas.integrations.mcp,
         "streamable_http_client",
         lambda url, http_client: (url, http_client),
     )
-    monkeypatch.setattr(geas.mcp, "Client", FakeClient)
+    monkeypatch.setattr(geas.integrations.mcp, "Client", FakeClient)
     registry = MCPRegistry(
         {
             "tasks": MCPServerConfig(
@@ -196,7 +200,7 @@ def test_planwise_login_returns_access_token(monkeypatch) -> None:
     client_type = httpx2.AsyncClient
     transport = httpx2.MockTransport(handle)
     monkeypatch.setattr(
-        geas.plan_agent.planwise.httpx2,
+        apps.blueprint.planwise.httpx2,
         "AsyncClient",
         lambda **options: client_type(transport=transport, **options),
     )

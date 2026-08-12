@@ -6,9 +6,9 @@ from dataclasses import replace
 import pytest
 
 from geas.ai.types import TextContent, ToolResultMessage
-from geas.plan_agent.profiles import load_skill_profiles
-from geas.plan_agent.skills import SkillRegistry
-from geas.plan_agent.types import Phase
+from apps.blueprint.profiles import load_skill_profiles
+from apps.blueprint.skills import SkillRegistry
+from apps.blueprint.types import Phase
 
 from .helpers import make_assistant, make_session, make_tool_call
 

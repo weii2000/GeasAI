@@ -3,4 +3,4 @@
 .venv
 __pycache__
 .pytest_cache
-tui/node_modules
+apps/blueprint/tui/node_modules

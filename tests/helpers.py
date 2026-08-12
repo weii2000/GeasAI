@@ -17,12 +17,12 @@ from geas.ai.types import (
 )
 from geas.core.agent import Agent
 from geas.core.types import AgentState
-from geas.plan_agent.session import (
+from apps.blueprint.session import (
     PLAN_AGENT_MAX_TURNS,
     REVIEW_AGENT_MAX_TURNS,
     PlanSession,
 )
-from geas.plan_agent.skills import SkillRegistry
+from apps.blueprint.skills import SkillRegistry
 
 
 class ScriptedModel:

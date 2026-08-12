@@ -6,11 +6,11 @@ from urllib.parse import urlparse
 
 from dotenv import load_dotenv, set_key
 
-from geas.mcp import MCPServerConfig
+from geas.integrations.mcp import MCPServerConfig
 
 
 type AgentPhaseName = Literal["PLAN", "REVIEW"]
-ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
+ENV_PATH = Path(__file__).with_name(".env")
 
 
 @dataclass(frozen=True)

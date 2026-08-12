@@ -1,5 +1,5 @@
 {
-  "name": "geas-tui",
+  "name": "geas-blueprint-tui",
   "private": true,
   "type": "module",
   "engines": {

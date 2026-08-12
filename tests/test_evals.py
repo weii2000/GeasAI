@@ -4,13 +4,15 @@ from pathlib import Path
 
 import pytest
 
-from evals.codex import (
+from apps.blueprint.evals.codex import (
+    DEFAULT_OUTPUT_DIR as CODEX_OUTPUT_DIR,
     _OUTPUT,
     _build_prompt,
     _parse_usage,
     _strict_schema,
 )
-from evals.single_phase import (
+from apps.blueprint.evals.single_phase import (
+    DEFAULT_OUTPUT_DIR as PLAN_OUTPUT_DIR,
     EvalOutput,
     _score,
     _summarize_usage,
@@ -19,10 +21,18 @@ from evals.single_phase import (
     score_output,
 )
 from geas.ai.types import TextContent, ToolResultMessage
-from geas.config import load_model_selection
-from geas.plan_agent.types import Phase, Plan, Task
+from apps.blueprint.config import load_model_selection
+from apps.blueprint.types import Phase, Plan, Task
 
 from .helpers import make_assistant, make_session, make_tool_call
+
+
+def test_eval_output_paths_are_stable() -> None:
+    root = Path(__file__).resolve().parents[1]
+    assert PLAN_OUTPUT_DIR == root / "eval-results/blueprint/single-phase"
+    assert CODEX_OUTPUT_DIR == (
+        root / "eval-results/blueprint/comparison/codex"
+    )
 
 
 def test_single_phase_eval_suite_has_unique_plan_and_review_cases() -> None:

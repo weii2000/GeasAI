@@ -112,7 +112,7 @@ type RPCEvent =
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "../..",
+  "../../../..",
 );
 
 const selectTheme: SelectListTheme = {
@@ -153,7 +153,7 @@ class RPCClient {
   constructor() {
     const python =
       process.env.GEAS_PYTHON ?? path.join(projectRoot, ".venv/bin/python");
-    this.child = spawn(python, ["-m", "geas.rpc"], {
+    this.child = spawn(python, ["-m", "apps.blueprint.rpc"], {
       cwd: projectRoot,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -291,7 +291,7 @@ class SecretInput implements Component, Focusable {
   }
 }
 
-class GeasTUI {
+class BlueprintTUI {
   private terminal = new ProcessTerminal();
   private tui = new TUI(this.terminal, true);
   private header = new Text("", 1, 0);
@@ -323,7 +323,7 @@ class GeasTUI {
           { name: "resume", description: "恢复历史会话" },
           { name: "model", description: "选择 PLAN / REVIEW 模型" },
           { name: "login", description: "保存 Provider API Key" },
-          { name: "quit", description: "退出 Geas" },
+          { name: "quit", description: "退出 Blueprint" },
         ],
         projectRoot,
       ),
@@ -408,7 +408,7 @@ class GeasTUI {
     } else if (event.event === "text_delta") {
       if (!this.streaming) {
         this.chat.addChild(
-          new Text(chalk.cyan.bold(`Geas · ${event.phase}`), 1, 1),
+          new Text(chalk.cyan.bold(`Blueprint · ${event.phase}`), 1, 1),
         );
         const block = new Markdown("", 1, 0, markdownTheme);
         this.chat.addChild(block);
@@ -714,7 +714,7 @@ class GeasTUI {
 
   private addAssistantMessage(message: ConversationMessage): void {
     this.chat.addChild(
-      new Text(chalk.cyan.bold(`Geas · ${message.phase}`), 1, 1),
+      new Text(chalk.cyan.bold(`Blueprint · ${message.phase}`), 1, 1),
     );
     this.chat.addChild(
       new Markdown(message.content, 1, 0, markdownTheme),
@@ -829,7 +829,7 @@ async function main(): Promise<void> {
   const rpc = new RPCClient();
   try {
     const initial = await rpc.request<InitialState>("initialize");
-    new GeasTUI(rpc, initial).start();
+    new BlueprintTUI(rpc, initial).start();
   } catch (error) {
     rpc.kill();
     console.error(error instanceof Error ? error.message : error);
