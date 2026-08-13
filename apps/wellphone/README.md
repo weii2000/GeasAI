@@ -13,6 +13,7 @@ Wellphone 将“决策”和“执行”分离：
 
 - **Mac Agent Server**：通过 FastAPI 接收任务，复用 geas.ai 和 geas.core 运行 Agent Loop；
 - **Session Store**：按 `device → session → run` 隔离对话，并在 Mac 本地原子持久化可见消息；
+- **Long-term Memory**：按设备保存可见 raw turn，通过 Gate 按需检索 facts/events，并每六轮批量提取；
 - **Tool Broker**：把同步的 Agent Tool Call 转换为手机可轮询的任务，并等待结果；
 - **Server Tool**：使用只保存在 Mac 的凭据调用 YouTube Data API；
 - **iOS Executor**：校验工具作用域，调用原生 Kit 或构造受限的外部 App 链接；
@@ -58,6 +59,7 @@ sequenceDiagram
 | config.py | Wellphone 环境配置与启动参数默认值 |
 | service.py | 任务状态、Agent 生命周期与取消 |
 | session.py | 对话上下文、设备归属与 JSON 持久化 |
+| geas/memory | 通用的 SQLite/FTS5、检索 Gate 和 facts/events 提取 |
 | agent.py | System Prompt、Tool Schema、YouTube 搜索与 Geas Agent 组装 |
 | broker.py | Tool Call 排队、重投递、超时和结果匹配 |
 | protocol.py | Mac 与 iOS 之间的 JSON 数据契约 |
@@ -75,6 +77,7 @@ sequenceDiagram
 - 原始照片留在 iPhone；模型只接收照片元数据和 OCR 文本；
 - Server 日志不记录 Prompt、OCR、邮件正文或 Tool Result 内容；
 - Session 文件只保存可见对话；原始 OCR 和 Tool Result 在每轮结束后清除；
+- 长期记忆数据库按设备隔离，只记录可见对话，不保存原始 OCR 或 Tool Result；
 - OCR 内容被视为不可信数据，不能作为 Agent 指令；
 - 工具只能操作本次搜索返回的照片和本次任务创建或解析的相册；
 - 删除、隐藏、改日期/位置和移出相册等高风险操作必须在手机端再次确认；

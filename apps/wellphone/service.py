@@ -8,6 +8,7 @@ from time import perf_counter
 
 from geas.ai.model_registry import StreamFunction
 from geas.ai.types import Model
+from geas.memory import MemoryService
 
 from .broker import ToolBroker
 from .observability import log_event
@@ -40,14 +41,28 @@ class WellphoneService:
         stream_function: StreamFunction,
         tool_timeout: float = 180.0,
         sessions_root: Path | None = None,
+        memory_model: Model | None = None,
+        memory_stream_function: StreamFunction | None = None,
+        memory_root: Path | None = None,
     ) -> None:
+        if (memory_model is None) != (memory_stream_function is None):
+            raise ValueError(
+                "memory_model and memory_stream_function must be used together"
+            )
         self.model = model
         self.stream_function = stream_function
+        self.memory_model = memory_model
+        self.memory_stream_function = memory_stream_function
+        self.memory_root = (
+            memory_root
+            or Path.home() / ".geas" / "wellphone" / "memory"
+        )
         self.broker = ToolBroker(result_timeout=tool_timeout)
         self.store = SessionStore(sessions_root)
         self.sessions: dict[str, WellphoneSession] = {}
         self.tasks: dict[str, TaskRecord] = {}
         self._runs: dict[str, asyncio.Task[None]] = {}
+        self._memories: dict[str, MemoryService] = {}
         for snapshot in self.store.load_all():
             self.sessions[snapshot.id] = self._build_session(
                 snapshot.id,
@@ -160,6 +175,9 @@ class WellphoneService:
             await asyncio.gather(*runs, return_exceptions=True)
         for task_id in list(self.tasks):
             self.broker.remove_task(task_id)
+        for memory in self._memories.values():
+            memory.close()
+        self._memories.clear()
 
     async def _run(self, record: TaskRecord, started: float) -> None:
         session = self.sessions[record.session_id]
@@ -208,8 +226,24 @@ class WellphoneService:
             self.stream_function,
             self.broker,
             self._set_task_status,
+            memory=self._memory_for(device_id),
             **saved,
         )
+
+    def _memory_for(self, device_id: str) -> MemoryService | None:
+        if self.memory_model is None or self.memory_stream_function is None:
+            return None
+        memory = self._memories.get(device_id)
+        if memory is not None:
+            return memory
+        normalized = uuid.UUID(device_id).hex
+        memory = MemoryService(
+            self.memory_root / f"{normalized}.sqlite3",
+            self.memory_model,
+            self.memory_stream_function,
+        )
+        self._memories[device_id] = memory
+        return memory
 
     def _set_task_status(self, task_id: str, status: TaskStatus) -> None:
         record = self.tasks.get(task_id)

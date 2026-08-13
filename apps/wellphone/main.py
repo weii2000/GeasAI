@@ -24,11 +24,22 @@ def main() -> None:
             f"unknown Wellphone model {config.provider}/{config.model}; "
             f"available: {available}"
         )
+    memory_model = models.get_model(
+        config.memory_provider,
+        config.memory_model,
+    )
+    if memory_model is None:
+        raise ValueError(
+            "unknown Wellphone memory model "
+            f"{config.memory_provider}/{config.memory_model}"
+        )
 
     service = WellphoneService(
         model,
         models.stream,
         tool_timeout=args.tool_timeout,
+        memory_model=memory_model,
+        memory_stream_function=models.stream,
     )
     uvicorn.run(create_app(service), host=args.host, port=args.port)
 

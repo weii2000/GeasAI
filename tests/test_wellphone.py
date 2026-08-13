@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import sqlite3
 import uuid
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from apps.wellphone.service import WellphoneService
 from geas.ai.event_stream import AssistantResponseStream
 from geas.ai.providers.deepseek import DEEPSEEK_MODELS
 from geas.ai.types import ResponseErrorEvent, TextContent
+from geas.memory import MemoryService
 
 from .helpers import ScriptedModel, make_assistant, make_tool_call
 
@@ -325,6 +327,151 @@ def test_session_history_is_reused_and_persisted(tmp_path: Path) -> None:
             "answer 2",
         ]
         await restored.close()
+
+    asyncio.run(run())
+
+
+def test_memory_consolidates_retrieves_and_skips(tmp_path: Path) -> None:
+    async def run() -> None:
+        memory_model = ScriptedModel(
+            [
+                make_assistant(
+                    [TextContent(
+                        type="text",
+                        text=json.dumps({
+                            "facts": [{
+                                "subject": "Alex",
+                                "content": "Alex prefers morning meetings.",
+                            }],
+                            "events": [{
+                                "summary": "Planned a demo with Alex.",
+                                "happened_at": "2026-08-13",
+                            }],
+                        }),
+                    )],
+                    "stop",
+                ),
+                make_assistant(
+                    [TextContent(
+                        type="text",
+                        text=json.dumps({
+                            "retrieve": True,
+                            "query": "Alex",
+                            "reason": "personal relationship",
+                        }),
+                    )],
+                    "stop",
+                ),
+                make_assistant(
+                    [TextContent(
+                        type="text",
+                        text=json.dumps({
+                            "retrieve": False,
+                            "query": "",
+                            "reason": "general knowledge",
+                        }),
+                    )],
+                    "stop",
+                ),
+            ]
+        )
+        path = tmp_path / "memory.sqlite3"
+        memory = MemoryService(
+            path,
+            DEEPSEEK_MODELS[0],
+            memory_model,
+            consolidate_every=2,
+        )
+
+        assert await memory.remember_exchange(
+            "turn-1",
+            "session-1",
+            "Alex likes early meetings.",
+            "I will remember that.",
+        ) == 0
+        assert await memory.remember_exchange(
+            "turn-2",
+            "session-1",
+            "We planned the demo today.",
+            "The demo plan is ready.",
+        ) == 2
+
+        recalled = await memory.recall("When should I meet Alex?")
+        assert {(item.kind, item.content) for item in recalled} == {
+            ("fact", "Alex prefers morning meetings."),
+            ("event", "Planned a demo with Alex."),
+        }
+        assert await memory.recall("What is two plus two?") == []
+        assert await memory.remember_exchange(
+            "turn-2",
+            "session-1",
+            "We planned the demo today.",
+            "The demo plan is ready.",
+        ) == 0
+        memory.close()
+
+        with sqlite3.connect(path) as connection:
+            assert connection.execute(
+                "SELECT COUNT(*) FROM raw_turns"
+            ).fetchone()[0] == 2
+            assert connection.execute(
+                "SELECT COUNT(*) FROM raw_turns WHERE consolidated = 1"
+            ).fetchone()[0] == 2
+            assert connection.execute(
+                "SELECT COUNT(*) FROM facts"
+            ).fetchone()[0] == 1
+
+        assert len(memory_model.contexts) == 3
+        assert "untrusted data" in (
+            memory_model.contexts[0].system_prompt or ""
+        )
+
+    asyncio.run(run())
+
+
+def test_wellphone_memory_files_are_isolated_by_device(
+    tmp_path: Path,
+) -> None:
+    async def run() -> None:
+        stream = ScriptedModel([
+            make_assistant([TextContent(type="text", text="answer 1")], "stop"),
+            make_assistant([TextContent(type="text", text="answer 2")], "stop"),
+        ])
+        memory_stream = ScriptedModel([])
+        memory_root = tmp_path / "memory"
+        service = WellphoneService(
+            DEEPSEEK_MODELS[0],
+            stream,
+            sessions_root=tmp_path / "sessions",
+            memory_model=DEEPSEEK_MODELS[0],
+            memory_stream_function=memory_stream,
+            memory_root=memory_root,
+        )
+        devices = [str(uuid.uuid4()), str(uuid.uuid4())]
+        records = [
+            service.create_task(
+                f"message {index}",
+                device_id,
+                str(uuid.uuid4()),
+            )
+            for index, device_id in enumerate(devices, start=1)
+        ]
+        await asyncio.gather(*(service._runs[record.id] for record in records))
+        await service.close()
+
+        paths = [
+            memory_root / f"{uuid.UUID(device_id).hex}.sqlite3"
+            for device_id in devices
+        ]
+        assert paths[0] != paths[1]
+        for index, path in enumerate(paths, start=1):
+            with sqlite3.connect(path) as connection:
+                row = connection.execute(
+                    "SELECT user_message FROM raw_turns"
+                ).fetchone()
+                assert row == (f"message {index}",)
+
+        assert memory_stream.contexts == []
 
     asyncio.run(run())
 
