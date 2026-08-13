@@ -1,5 +1,6 @@
 import Foundation
 import MessageUI
+import UIKit
 
 @MainActor
 final class ToolExecutor {
@@ -10,6 +11,13 @@ final class ToolExecutor {
     private var initialSearchRange: (start: Date, end: Date)?
     private var albumName: String?
     private var scopeLocked = false
+    private let photoToolNames: Set<String> = [
+        "search_photos", "get_photo_details", "analyze_photos", "list_albums",
+        "find_album", "create_album", "rename_album", "delete_album",
+        "add_photos_to_album", "remove_photos_from_album", "get_album_contents",
+        "set_favorite", "set_hidden", "set_photo_creation_date",
+        "set_photo_location", "delete_photos",
+    ]
 
     func resetScope() {
         allowedPhotoIDs.removeAll()
@@ -26,7 +34,7 @@ final class ToolExecutor {
         onMailDraft: (MailDraft) -> Void = { _ in }
     ) async -> ToolResultRequest {
         do {
-            if call.name != "compose_email" {
+            if photoToolNames.contains(call.name) {
                 try await photos.requireFullAccess()
             }
             let result = try await execute(
@@ -346,6 +354,71 @@ final class ToolExecutor {
                 "recipient_count": .number(Double(draft.to.count + draft.cc.count + draft.bcc.count)),
             ]
 
+        case "open_youtube_video":
+            let videoID = try arguments.requiredString("video_id")
+            let title = try arguments.requiredString("title")
+            let allowed = CharacterSet.alphanumerics.union(
+                CharacterSet(charactersIn: "-_")
+            )
+            guard videoID.count == 11,
+                  videoID.unicodeScalars.allSatisfy(allowed.contains) else {
+                throw WellphoneError.invalidArguments("YouTube video_id 格式无效")
+            }
+            var components = URLComponents(string: "https://www.youtube.com/watch")!
+            components.queryItems = [URLQueryItem(name: "v", value: videoID)]
+            try await requireApproval(
+                ToolApproval(
+                    title: "打开 YouTube？",
+                    message: title,
+                    destructive: false
+                ),
+                approve
+            )
+            try await openExternalURL(components.url)
+            return ["opened": .bool(true), "video_id": .string(videoID)]
+
+        case "open_google_maps_search":
+            let query = try arguments.requiredString("query")
+            let url = try mapsURL(
+                path: "/maps/search/",
+                items: [URLQueryItem(name: "query", value: query)]
+            )
+            try await requireApproval(
+                ToolApproval(
+                    title: "在 Google Maps 中搜索？",
+                    message: query,
+                    destructive: false
+                ),
+                approve
+            )
+            try await openExternalURL(url)
+            return ["opened": .bool(true), "query": .string(query)]
+
+        case "open_google_maps_directions":
+            let destination = try arguments.requiredString("destination")
+            let mode = try arguments.requiredString("travel_mode")
+            guard ["driving", "walking", "bicycling", "transit"].contains(mode) else {
+                throw WellphoneError.invalidArguments("不支持的 Google Maps 出行方式")
+            }
+            var items = [
+                URLQueryItem(name: "destination", value: destination),
+                URLQueryItem(name: "travelmode", value: mode),
+            ]
+            if let origin = arguments["origin"]?.string, !origin.isEmpty {
+                items.append(URLQueryItem(name: "origin", value: origin))
+            }
+            let url = try mapsURL(path: "/maps/dir/", items: items)
+            try await requireApproval(
+                ToolApproval(
+                    title: "在 Google Maps 中规划路线？",
+                    message: "目的地：\(destination)",
+                    destructive: false
+                ),
+                approve
+            )
+            try await openExternalURL(url)
+            return ["opened": .bool(true), "destination": .string(destination)]
+
         default:
             throw WellphoneError.invalidArguments("未知工具 \(name)")
         }
@@ -409,5 +482,23 @@ final class ToolExecutor {
             throw WellphoneError.invalidArguments("日期必须是带时区的 ISO 8601")
         }
         return date
+    }
+
+    private func mapsURL(path: String, items: [URLQueryItem]) throws -> URL {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "www.google.com"
+        components.path = path
+        components.queryItems = [URLQueryItem(name: "api", value: "1")] + items
+        guard let url = components.url else {
+            throw WellphoneError.invalidArguments("无法生成 Google Maps 链接")
+        }
+        return url
+    }
+
+    private func openExternalURL(_ url: URL?) async throws {
+        guard let url, await UIApplication.shared.open(url) else {
+            throw WellphoneError.externalAppUnavailable
+        }
     }
 }

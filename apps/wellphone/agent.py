@@ -1,6 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import html
+import json
+import os
 from collections.abc import Awaitable, Callable
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 from geas.ai.model_registry import StreamFunction
 from geas.ai.types import AssistantMessage, Model, TextContent
@@ -38,12 +45,76 @@ Rules:
   If the user declines an operation, do not request it again in the same run.
 - compose_email only prepares the native Mail composer. Never claim that a
   message was sent; the user must review it and tap Send in Apple's UI.
+- search_youtube searches public videos. YouTube's official API cannot add to
+  Watch Later; explain that limitation and offer to open a selected video.
+- Opening YouTube or Google Maps requires phone confirmation and takes the user
+  to that app. Use Google Maps URLs for search and directions; omit origin to
+  let Maps use the phone's current location.
 - Verify changed photo or album state when the corresponding read tool exists.
   Report counts, skipped items, and errors without exposing raw OCR needlessly.
 """
 
 
 TOOL_SPECS: tuple[tuple[str, str, dict[str, object]], ...] = (
+    (
+        "search_youtube",
+        "Search public YouTube videos. This cannot modify Watch Later.",
+        {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "minLength": 1, "maxLength": 200},
+                "max_results": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 5,
+                },
+            },
+            "required": ["query", "max_results"],
+            "additionalProperties": False,
+        },
+    ),
+    (
+        "open_youtube_video",
+        "Ask the phone to open one YouTube video selected from search results.",
+        {
+            "type": "object",
+            "properties": {
+                "video_id": {"type": "string", "minLength": 11, "maxLength": 11},
+                "title": {"type": "string", "minLength": 1, "maxLength": 200},
+            },
+            "required": ["video_id", "title"],
+            "additionalProperties": False,
+        },
+    ),
+    (
+        "open_google_maps_search",
+        "Ask the phone to open Google Maps with a place search.",
+        {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "minLength": 1, "maxLength": 300}
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    ),
+    (
+        "open_google_maps_directions",
+        "Ask the phone to open Google Maps directions. Omit origin for current location.",
+        {
+            "type": "object",
+            "properties": {
+                "destination": {"type": "string", "minLength": 1, "maxLength": 300},
+                "origin": {"type": "string", "minLength": 1, "maxLength": 300},
+                "travel_mode": {
+                    "type": "string",
+                    "enum": ["driving", "walking", "bicycling", "transit"],
+                },
+            },
+            "required": ["destination", "travel_mode"],
+            "additionalProperties": False,
+        },
+    ),
     (
         "search_photos",
         "Find photos or videos in a half-open capture-date interval.",
@@ -323,6 +394,8 @@ def create_phone_agent(
             call_id: str,
             arguments: dict[str, object],
         ) -> AgentToolResult:
+            if name == "search_youtube":
+                return await _search_youtube(arguments)
             result = await remote_execute(call_id, name, arguments)
             if result.is_error:
                 raise RuntimeError(result.for_model())
@@ -363,3 +436,73 @@ def final_text(agent: Agent) -> str:
             if text:
                 return text
     return "任务已完成。"
+
+
+async def _search_youtube(arguments: dict[str, object]) -> AgentToolResult:
+    api_key = os.getenv("YOUTUBE_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("Mac Server 未配置 YOUTUBE_API_KEY")
+    query = str(arguments["query"])
+    max_results = int(arguments["max_results"])
+    try:
+        data = await asyncio.to_thread(
+            _youtube_request,
+            api_key,
+            query,
+            max_results,
+        )
+    except HTTPError as error:
+        raise RuntimeError(f"YouTube API 请求失败（HTTP {error.code}）") from error
+    except (URLError, TimeoutError) as error:
+        raise RuntimeError("无法连接 YouTube API") from error
+    return AgentToolResult(
+        content=[
+            TextContent(
+                type="text",
+                text=json.dumps(data, ensure_ascii=False, separators=(",", ":")),
+            )
+        ]
+    )
+
+
+def _youtube_request(
+    api_key: str,
+    query: str,
+    max_results: int,
+) -> dict[str, object]:
+    params = urlencode(
+        {
+            "part": "snippet",
+            "type": "video",
+            "q": query,
+            "maxResults": max_results,
+            "key": api_key,
+        }
+    )
+    request = Request(
+        f"https://www.googleapis.com/youtube/v3/search?{params}",
+        headers={"Accept": "application/json", "User-Agent": "Geas-Wellphone/1"},
+    )
+    with urlopen(request, timeout=15) as response:
+        payload = json.load(response)
+    return _youtube_result(payload)
+
+
+def _youtube_result(payload: dict[str, object]) -> dict[str, object]:
+    videos = []
+    for item in payload.get("items", []):
+        video_id = item.get("id", {}).get("videoId")
+        snippet = item.get("snippet", {})
+        if not video_id:
+            continue
+        videos.append(
+            {
+                "video_id": video_id,
+                "title": html.unescape(snippet.get("title", "")),
+                "channel": html.unescape(snippet.get("channelTitle", "")),
+                "published_at": snippet.get("publishedAt"),
+                "thumbnail_url": snippet.get("thumbnails", {}).get("medium", {}).get("url"),
+                "url": f"https://www.youtube.com/watch?v={video_id}",
+            }
+        )
+    return {"count": len(videos), "videos": videos}

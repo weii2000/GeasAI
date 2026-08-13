@@ -243,6 +243,7 @@ enum WellphoneError: LocalizedError {
     case backgroundRegistrationFailed
     case backgroundStartTimedOut
     case mailUnavailable
+    case externalAppUnavailable
     case userDeclined(String)
 
     var errorDescription: String? {
@@ -269,6 +270,8 @@ enum WellphoneError: LocalizedError {
             "系统未能及时启动后台任务，请稍后重试。"
         case .mailUnavailable:
             "这台设备尚未在 Apple Mail 中配置可发送邮件的账户。"
+        case .externalAppUnavailable:
+            "无法打开外部 App 或网页。"
         case .userDeclined(let action):
             "用户未批准操作：\(action)"
         }

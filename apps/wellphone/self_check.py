@@ -21,6 +21,7 @@ from geas.ai.types import (
     UsageCost,
 )
 
+from .agent import _youtube_result
 from .broker import ToolBroker
 from .protocol import ToolResultEnvelope
 from .server import create_app
@@ -289,6 +290,26 @@ def check_fastapi_boundary() -> None:
             assert invalid.json() == {"error": "request validation failed"}
 
 
+def check_youtube_result() -> None:
+    result = _youtube_result(
+        {
+            "items": [
+                {
+                    "id": {"videoId": "abcdefghijk"},
+                    "snippet": {
+                        "title": "Agents &amp; Tools",
+                        "channelTitle": "Geas",
+                        "publishedAt": "2026-08-13T00:00:00Z",
+                        "thumbnails": {"medium": {"url": "https://example.test/a.jpg"}},
+                    },
+                }
+            ]
+        }
+    )
+    assert result["count"] == 1
+    assert result["videos"][0]["title"] == "Agents & Tools"
+
+
 def main() -> None:
     async def check_all() -> None:
         await check_broker_round_trip()
@@ -297,6 +318,7 @@ def main() -> None:
 
     asyncio.run(check_all())
     check_fastapi_boundary()
+    check_youtube_result()
     print("Wellphone protocol self-check passed")
 
 

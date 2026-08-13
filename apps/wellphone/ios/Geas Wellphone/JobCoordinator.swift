@@ -188,7 +188,9 @@ final class JobCoordinator {
             finishRunningActivity(as: .completed)
             let toolName = displayName(for: call.name)
             updateActivity(id: call.callID, title: toolName, state: .running)
-            if call.name != "compose_email", backgroundTask == nil {
+            if call.name != "compose_email",
+               !call.name.hasPrefix("open_"),
+               backgroundTask == nil {
                 status = "正在启动后台任务…"
                 try await submitBackgroundTask()
             }
@@ -393,6 +395,9 @@ final class JobCoordinator {
         case "set_photo_location": "修改照片位置"
         case "delete_photos": "删除照片"
         case "compose_email": "准备邮件草稿"
+        case "open_youtube_video": "打开 YouTube 视频"
+        case "open_google_maps_search": "打开地图搜索"
+        case "open_google_maps_directions": "打开路线规划"
         default: tool
         }
     }
