@@ -10,13 +10,6 @@ final class ToolExecutor {
     private var initialSearchRange: (start: Date, end: Date)?
     private var albumName: String?
     private var scopeLocked = false
-    private let photoToolNames: Set<String> = [
-        "search_photos", "get_photo_details", "analyze_photos", "list_albums",
-        "find_album", "create_album", "rename_album", "delete_album",
-        "add_photos_to_album", "remove_photos_from_album", "get_album_contents",
-        "set_favorite", "set_hidden", "set_photo_creation_date",
-        "set_photo_location", "delete_photos",
-    ]
 
     func resetScope() {
         allowedPhotoIDs.removeAll()
@@ -33,11 +26,14 @@ final class ToolExecutor {
         onPendingAction: (PendingAction) -> Void = { _ in }
     ) async -> ToolResultRequest {
         do {
-            if photoToolNames.contains(call.name) {
+            guard let name = ToolName(rawValue: call.name) else {
+                throw WellphoneError.invalidArguments("未知工具 \(call.name)")
+            }
+            if name.requiresPhotoAccess {
                 try await photos.requireFullAccess()
             }
             let result = try await execute(
-                name: call.name,
+                name: name,
                 actionID: call.callID,
                 arguments: call.arguments,
                 onProgress: onProgress,
@@ -55,7 +51,7 @@ final class ToolExecutor {
     }
 
     private func execute(
-        name: String,
+        name: ToolName,
         actionID: String,
         arguments: [String: JSONValue],
         onProgress: (String) -> Void,
@@ -63,7 +59,7 @@ final class ToolExecutor {
         onPendingAction: (PendingAction) -> Void
     ) async throws -> [String: JSONValue] {
         switch name {
-        case "search_photos":
+        case .searchPhotos:
             let start = try parseDate(arguments.requiredString("start"))
             let end = try parseDate(arguments.requiredString("end"))
             guard !scopeLocked else {
@@ -93,7 +89,7 @@ final class ToolExecutor {
                 "photos": .array(results.map(\.json)),
             ]
 
-        case "get_photo_details":
+        case .getPhotoDetails:
             let identifiers = try arguments.requiredStrings("identifiers")
             try requireAllowed(identifiers)
             let result = photos.details(identifiers: identifiers)
@@ -102,7 +98,7 @@ final class ToolExecutor {
                 "missing_identifiers": strings(result.missing),
             ]
 
-        case "analyze_photos":
+        case .analyzePhotos:
             let identifiers = try arguments.requiredStrings("identifiers")
             try requireAllowed(identifiers)
             guard identifiers.count <= 12 else {
@@ -131,14 +127,14 @@ final class ToolExecutor {
             }
             return ["analyses": .array(results)]
 
-        case "list_albums":
+        case .listAlbums:
             let albums = photos.listAlbums()
             return [
                 "count": .number(Double(albums.count)),
                 "albums": .array(albums.map(\.json)),
             ]
 
-        case "find_album":
+        case .findAlbum:
             let name = try arguments.requiredString("name")
             guard !scopeLocked || albumName != nil else {
                 throw WellphoneError.toolScopeViolation("照片分析后不能再选择目标相册")
@@ -147,7 +143,7 @@ final class ToolExecutor {
             try selectAlbum(identifier: identifier, name: name)
             return ["album_id": .string(identifier), "name": .string(name)]
 
-        case "create_album":
+        case .createAlbum:
             let name = try arguments.requiredString("name")
             guard !scopeLocked || albumName != nil else {
                 throw WellphoneError.toolScopeViolation("照片分析后不能再选择目标相册")
@@ -161,7 +157,7 @@ final class ToolExecutor {
             try selectAlbum(identifier: identifier, name: name)
             return ["album_id": .string(identifier), "name": .string(name)]
 
-        case "rename_album":
+        case .renameAlbum:
             let albumID = try arguments.requiredString("album_id")
             let newName = try arguments.requiredString("new_name")
             try requireWritableAlbum(albumID)
@@ -177,7 +173,7 @@ final class ToolExecutor {
             albumName = newName
             return ["album_id": .string(albumID), "name": .string(newName)]
 
-        case "delete_album":
+        case .deleteAlbum:
             let albumID = try arguments.requiredString("album_id")
             try requireWritableAlbum(albumID)
             try await requireApproval(
@@ -192,7 +188,7 @@ final class ToolExecutor {
             writableAlbumIDs.remove(albumID)
             return ["deleted": .bool(true)]
 
-        case "add_photos_to_album":
+        case .addPhotosToAlbum:
             let albumID = try arguments.requiredString("album_id")
             let identifiers = try arguments.requiredStrings("identifiers")
             try requireWritableAlbum(albumID)
@@ -204,7 +200,7 @@ final class ToolExecutor {
                 "missing_identifiers": strings(result.missing),
             ]
 
-        case "remove_photos_from_album":
+        case .removePhotosFromAlbum:
             let albumID = try arguments.requiredString("album_id")
             let identifiers = try arguments.requiredStrings("identifiers")
             try requireWritableAlbum(albumID)
@@ -227,7 +223,7 @@ final class ToolExecutor {
                 "not_present_identifiers": strings(result.notPresent),
             ]
 
-        case "get_album_contents":
+        case .getAlbumContents:
             let albumID = try arguments.requiredString("album_id")
             try requireWritableAlbum(albumID)
             let identifiers = try photos.albumContents(identifier: albumID)
@@ -236,7 +232,7 @@ final class ToolExecutor {
                 "identifiers": strings(identifiers),
             ]
 
-        case "set_favorite":
+        case .setFavorite:
             let identifiers = try arguments.requiredStrings("identifiers")
             let favorite = try arguments.requiredBool("favorite")
             try requireAllowed(identifiers)
@@ -255,7 +251,7 @@ final class ToolExecutor {
                 "missing_identifiers": strings(result.missing),
             ]
 
-        case "set_hidden":
+        case .setHidden:
             let identifiers = try arguments.requiredStrings("identifiers")
             let hidden = try arguments.requiredBool("hidden")
             try requireAllowed(identifiers)
@@ -274,7 +270,7 @@ final class ToolExecutor {
                 "missing_identifiers": strings(result.missing),
             ]
 
-        case "set_photo_creation_date":
+        case .setPhotoCreationDate:
             let identifier = try arguments.requiredString("identifier")
             let dateString = try arguments.requiredString("date")
             try requireAllowed([identifier])
@@ -291,7 +287,7 @@ final class ToolExecutor {
             try await photos.setCreationDate(identifier: identifier, date: date)
             return ["updated": .bool(true)]
 
-        case "set_photo_location":
+        case .setPhotoLocation:
             let identifiers = try arguments.requiredStrings("identifiers")
             let latitude = try arguments.requiredNumber("latitude")
             let longitude = try arguments.requiredNumber("longitude")
@@ -318,7 +314,7 @@ final class ToolExecutor {
                 "missing_identifiers": strings(result.missing),
             ]
 
-        case "delete_photos":
+        case .deletePhotos:
             let identifiers = try arguments.requiredStrings("identifiers")
             try requireAllowed(identifiers)
             try await requireApproval(
@@ -337,7 +333,7 @@ final class ToolExecutor {
                 "missing_identifiers": strings(result.missing),
             ]
 
-        case "compose_email":
+        case .composeEmail:
             guard MFMailComposeViewController.canSendMail() else {
                 throw WellphoneError.mailUnavailable
             }
@@ -366,7 +362,7 @@ final class ToolExecutor {
                 "recipient_count": .number(Double(draft.to.count + draft.cc.count + draft.bcc.count)),
             ]
 
-        case "open_youtube_video":
+        case .openYouTubeVideo:
             let videoID = try arguments.requiredString("video_id")
             let title = try arguments.requiredString("title")
             let allowed = CharacterSet.alphanumerics.union(
@@ -398,7 +394,7 @@ final class ToolExecutor {
                 "video_id": .string(videoID),
             ]
 
-        case "open_google_maps_search":
+        case .openGoogleMapsSearch:
             let query = try arguments.requiredString("query")
             let url = try mapsURL(
                 path: "/maps/search/",
@@ -421,7 +417,7 @@ final class ToolExecutor {
                 "query": .string(query),
             ]
 
-        case "open_google_maps_directions":
+        case .openGoogleMapsDirections:
             let destination = try arguments.requiredString("destination")
             let mode = try arguments.requiredString("travel_mode")
             guard ["driving", "walking", "bicycling", "transit"].contains(mode) else {
@@ -452,8 +448,6 @@ final class ToolExecutor {
                 "destination": .string(destination),
             ]
 
-        default:
-            throw WellphoneError.invalidArguments("未知工具 \(name)")
         }
     }
 

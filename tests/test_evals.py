@@ -24,7 +24,7 @@ from apps.blueprint.evals.single_phase import (
 from geas.ai.types import TextContent, ToolResultMessage
 from apps.blueprint.config import load_model_selection
 from apps.blueprint.types import Phase, Plan, Task
-from apps.wellphone.eval import (
+from apps.wellphone.evals.agent import (
     DEFAULT_OUTPUT_DIR as WELLPHONE_OUTPUT_DIR,
     EvalOutput as WellphoneEvalOutput,
     _tool_result as wellphone_tool_result,

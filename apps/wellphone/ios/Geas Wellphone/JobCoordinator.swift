@@ -206,15 +206,16 @@ final class JobCoordinator {
                 continue
             }
             finishRunningActivity(as: .completed)
-            let toolName = displayName(for: call.name)
-            updateActivity(id: call.callID, title: toolName, state: .running)
-            status = "正在执行：\(toolName)"
+            let toolName = ToolName(rawValue: call.name)
+            let toolTitle = toolName?.displayName ?? call.name
+            updateActivity(id: call.callID, title: toolTitle, state: .running)
+            status = "正在执行：\(toolTitle)"
             let result = await executor.execute(
                 call,
                 onProgress: { detail in
                     self.updateActivity(
                         id: call.callID,
-                        title: toolName,
+                        title: toolTitle,
                         detail: detail,
                         state: .running
                     )
@@ -231,11 +232,11 @@ final class JobCoordinator {
             try await client.submit(taskID: created.id, result: result)
             updateActivity(
                 id: call.callID,
-                title: toolName,
+                title: toolTitle,
                 detail: result.isError ? "执行失败，Agent 正在处理" : nil,
                 state: result.isError ? .failed : .completed
             )
-            advanceProgress(title: "已完成：\(toolName)")
+            advanceProgress(title: "已完成：\(toolTitle)")
             status = "Agent 正在规划下一步…"
         }
         throw CancellationError()
@@ -501,29 +502,4 @@ final class JobCoordinator {
         try? await client.cancel(taskID: serverTaskID)
     }
 
-    private func displayName(for tool: String) -> String {
-        switch tool {
-        case "search_photos": "查找照片"
-        case "get_photo_details": "读取照片信息"
-        case "analyze_photos": "设备端识别照片"
-        case "list_albums": "读取相册"
-        case "find_album": "查找相册"
-        case "create_album": "创建相册"
-        case "rename_album": "重命名相册"
-        case "delete_album": "删除相册"
-        case "add_photos_to_album": "加入相册"
-        case "remove_photos_from_album": "移出相册"
-        case "get_album_contents": "核对相册"
-        case "set_favorite": "修改收藏"
-        case "set_hidden": "修改隐藏状态"
-        case "set_photo_creation_date": "修改照片日期"
-        case "set_photo_location": "修改照片位置"
-        case "delete_photos": "删除照片"
-        case "compose_email": "准备邮件草稿"
-        case "open_youtube_video": "准备 YouTube 视频"
-        case "open_google_maps_search": "准备地图搜索"
-        case "open_google_maps_directions": "准备路线规划"
-        default: tool
-        }
-    }
 }

@@ -24,13 +24,13 @@ from geas.ai.types import (
 from geas.core.agent import Agent
 from geas.core.types import AgentState, AgentTool, AgentToolResult, ToolExecute
 
-from .agent import SYSTEM_PROMPT, TOOL_SPECS, final_text
-from .config import load_config
+from ..agent import SYSTEM_PROMPT, TOOL_SPECS, final_text
+from ..config import load_config
 
 
-DEFAULT_SUITE_PATH = Path(__file__).with_name("eval_cases.json")
+DEFAULT_SUITE_PATH = Path(__file__).with_name("agent_cases.json")
 DEFAULT_OUTPUT_DIR = (
-    Path(__file__).resolve().parents[2] / "eval-results" / "wellphone" / "agent"
+    Path(__file__).resolve().parents[3] / "eval-results" / "wellphone" / "agent"
 )
 
 

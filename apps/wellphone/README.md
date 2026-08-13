@@ -63,7 +63,7 @@ sequenceDiagram
 | protocol.py | Mac 与 iOS 之间的 JSON 数据契约 |
 | observability.py | 不含业务正文的结构化生命周期日志 |
 | server.py | FastAPI 路由、请求验证和错误映射 |
-| eval.py / eval_cases.json | 真实模型 Agent Eval、确定性评分与代表性案例集 |
+| evals/agent.py / agent_cases.json | 真实模型 Agent Eval、确定性评分与代表性案例集 |
 | APIClient.swift | 创建任务、长轮询、回传结果和读取状态 |
 | JobCoordinator.swift | 前后台任务协调、进度与取消 |
 | ToolExecutor.swift | 工具路由、参数校验、任务级权限边界与待处理动作构造 |

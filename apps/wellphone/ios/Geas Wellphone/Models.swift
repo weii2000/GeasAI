@@ -132,6 +132,68 @@ struct ServerSession: Codable, Sendable {
     }
 }
 
+enum ToolName: String, Sendable {
+    case searchPhotos = "search_photos"
+    case getPhotoDetails = "get_photo_details"
+    case analyzePhotos = "analyze_photos"
+    case listAlbums = "list_albums"
+    case findAlbum = "find_album"
+    case createAlbum = "create_album"
+    case renameAlbum = "rename_album"
+    case deleteAlbum = "delete_album"
+    case addPhotosToAlbum = "add_photos_to_album"
+    case removePhotosFromAlbum = "remove_photos_from_album"
+    case getAlbumContents = "get_album_contents"
+    case setFavorite = "set_favorite"
+    case setHidden = "set_hidden"
+    case setPhotoCreationDate = "set_photo_creation_date"
+    case setPhotoLocation = "set_photo_location"
+    case deletePhotos = "delete_photos"
+    case composeEmail = "compose_email"
+    case openYouTubeVideo = "open_youtube_video"
+    case openGoogleMapsSearch = "open_google_maps_search"
+    case openGoogleMapsDirections = "open_google_maps_directions"
+
+    var requiresPhotoAccess: Bool {
+        switch self {
+        case .composeEmail, .openYouTubeVideo,
+             .openGoogleMapsSearch, .openGoogleMapsDirections:
+            false
+        case .searchPhotos, .getPhotoDetails, .analyzePhotos, .listAlbums,
+             .findAlbum, .createAlbum, .renameAlbum, .deleteAlbum,
+             .addPhotosToAlbum, .removePhotosFromAlbum, .getAlbumContents,
+             .setFavorite, .setHidden, .setPhotoCreationDate,
+             .setPhotoLocation, .deletePhotos:
+            true
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .searchPhotos: "查找照片"
+        case .getPhotoDetails: "读取照片信息"
+        case .analyzePhotos: "设备端识别照片"
+        case .listAlbums: "读取相册"
+        case .findAlbum: "查找相册"
+        case .createAlbum: "创建相册"
+        case .renameAlbum: "重命名相册"
+        case .deleteAlbum: "删除相册"
+        case .addPhotosToAlbum: "加入相册"
+        case .removePhotosFromAlbum: "移出相册"
+        case .getAlbumContents: "核对相册"
+        case .setFavorite: "修改收藏"
+        case .setHidden: "修改隐藏状态"
+        case .setPhotoCreationDate: "修改照片日期"
+        case .setPhotoLocation: "修改照片位置"
+        case .deletePhotos: "删除照片"
+        case .composeEmail: "准备邮件草稿"
+        case .openYouTubeVideo: "准备 YouTube 视频"
+        case .openGoogleMapsSearch: "准备地图搜索"
+        case .openGoogleMapsDirections: "准备路线规划"
+        }
+    }
+}
+
 struct ToolCall: Codable, Sendable {
     let taskID: String
     let callID: String
