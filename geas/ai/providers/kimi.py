@@ -11,9 +11,9 @@ KIMI_MODELS = [
         reasoning=True,
         input=["text"],
         cost=ModelCost(
-            input=2.8,
-            output=14,
-            cache_read=0.28,
+            input=20,
+            output=100,
+            cache_read=2,
             cache_write=0,
         ),
         context_window=1_048_576,

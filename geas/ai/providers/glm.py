@@ -11,9 +11,9 @@ GLM_MODELS = [
         reasoning=True,
         input=["text"],
         cost=ModelCost(
-            input=1.4,
-            output=4.4,
-            cache_read=0.26,
+            input=8,
+            output=28,
+            cache_read=2,
             cache_write=0,
         ),
         context_window=1_000_000,

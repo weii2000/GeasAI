@@ -1,4 +1,6 @@
 import asyncio
+import json
+import logging
 import uuid
 from pathlib import Path
 
@@ -111,7 +113,12 @@ def test_task_creation_is_idempotent_and_session_is_single_run(tmp_path: Path) -
     asyncio.run(run())
 
 
-def test_tool_call_survives_poll_retry_and_run_closes_broker(tmp_path: Path) -> None:
+def test_tool_call_survives_poll_retry_and_run_closes_broker(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="wellphone")
+
     async def run() -> None:
         stream = ScriptedModel(
             [
@@ -169,6 +176,17 @@ def test_tool_call_survives_poll_retry_and_run_closes_broker(tmp_path: Path) -> 
         await restored.close()
 
     asyncio.run(run())
+
+    events = [json.loads(record.message) for record in caplog.records]
+    by_name = {event["event"]: event for event in events}
+    assert by_name["task.created"]["session_id"]
+    assert by_name["tool.dispatched"]["call_id"]
+    assert by_name["tool.finished"]["status"] == "completed"
+    assert by_name["task.finished"]["status"] == "completed"
+    assert by_name["task.finished"]["duration_ms"] >= 0
+    assert "organize photos" not in "\n".join(
+        record.message for record in caplog.records
+    )
 
 
 def test_cancel_while_waiting_for_phone_unblocks_agent(tmp_path: Path) -> None:

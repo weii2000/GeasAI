@@ -282,10 +282,11 @@ def _apply_usage(
     )
     input_tokens = usage.prompt_tokens - cache_read
     output_tokens = usage.completion_tokens
+    cost = model.current_cost()
 
-    input_cost = input_tokens * model.cost.input / 1_000_000
-    output_cost = output_tokens * model.cost.output / 1_000_000
-    cache_read_cost = cache_read * model.cost.cache_read / 1_000_000
+    input_cost = input_tokens * cost.input / 1_000_000
+    output_cost = output_tokens * cost.output / 1_000_000
+    cache_read_cost = cache_read * cost.cache_read / 1_000_000
 
     details = usage.completion_tokens_details
     reasoning_tokens = details.reasoning_tokens if details else None

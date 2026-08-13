@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from dataclasses import dataclass, field
+from time import perf_counter
 
+from .observability import log_event
 from .protocol import ToolCallEnvelope, ToolResultEnvelope
 
 
@@ -59,6 +61,8 @@ class ToolBroker:
         if call_id in channel.pending or call_id in channel.completed:
             raise ValueError(f"duplicate tool call: {call_id}")
 
+        started = perf_counter()
+        status = "failed"
         future = asyncio.get_running_loop().create_future()
         channel.pending[call_id] = future
         async with channel.available:
@@ -71,15 +75,27 @@ class ToolBroker:
                 )
             )
             channel.available.notify_all()
+        log_event(
+            "tool.dispatched",
+            task_id=task_id,
+            call_id=call_id,
+            tool=name,
+        )
 
         try:
             async with asyncio.timeout(self._result_timeout):
-                return await future
+                result = await future
+                status = "error" if result.is_error else "completed"
+                return result
         except TimeoutError as error:
+            status = "timeout"
             raise TimeoutError(
                 f'phone did not finish tool "{name}" within '
                 f"{self._result_timeout:g} seconds"
             ) from error
+        except asyncio.CancelledError:
+            status = "cancelled"
+            raise
         finally:
             channel.pending.pop(call_id, None)
             channel.queued = deque(
@@ -87,6 +103,14 @@ class ToolBroker:
             )
             if channel.inflight and channel.inflight.call_id == call_id:
                 channel.inflight = None
+            log_event(
+                "tool.finished",
+                task_id=task_id,
+                call_id=call_id,
+                tool=name,
+                status=status,
+                duration_ms=round((perf_counter() - started) * 1000),
+            )
 
     async def next_call(
         self,
@@ -128,6 +152,11 @@ class ToolBroker:
     ) -> None:
         channel = self._require_channel(task_id)
         if result.call_id in channel.completed:
+            log_event(
+                "tool.result_reused",
+                task_id=task_id,
+                call_id=result.call_id,
+            )
             return
         future = channel.pending.get(result.call_id)
         if future is None:

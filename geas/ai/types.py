@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -45,6 +46,8 @@ class UserMessage:
 
 @dataclass
 class UsageCost:
+    """人民币费用。"""
+
     input: float
     output: float
     cache_read: float
@@ -139,6 +142,8 @@ type ModelThinkingLevel = Literal[
 
 @dataclass
 class ModelCost:
+    """每百万 Token 的人民币单价。"""
+
     input: float
     output: float
     cache_read: float
@@ -160,6 +165,10 @@ class Model:
     thinking_level_map: dict[ModelThinkingLevel, str | None] | None = None
     headers: dict[str, str] | None = None
     compat: dict[str, object] | None = None
+    cost_resolver: Callable[[], ModelCost] | None = None
+
+    def current_cost(self) -> ModelCost:
+        return self.cost_resolver() if self.cost_resolver else self.cost
 
 
 @dataclass

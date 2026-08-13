@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-import traceback
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from time import perf_counter
 
 from geas.ai.model_registry import StreamFunction
 from geas.ai.types import Model
 
 from .broker import ToolBroker
+from .observability import log_event
 from .protocol import TaskStatus
 from .session import SessionStore, WellphoneSession, new_session_id
 
@@ -75,6 +76,12 @@ class WellphoneService:
                 and existing.session_id != session_id
             ):
                 raise ValueError("task id already belongs to another prompt")
+            log_event(
+                "task.reused",
+                task_id=existing.id,
+                session_id=existing.session_id,
+                status=existing.status,
+            )
             return existing
 
         if session_id is None:
@@ -94,7 +101,12 @@ class WellphoneService:
         )
         self.tasks[task_id] = record
         self.broker.create_task(task_id)
-        run = asyncio.create_task(self._run(record))
+        log_event(
+            "task.created",
+            task_id=record.id,
+            session_id=record.session_id,
+        )
+        run = asyncio.create_task(self._run(record, perf_counter()))
         self._runs[task_id] = run
         run.add_done_callback(
             lambda _: self._finish_run(task_id, session)
@@ -110,6 +122,11 @@ class WellphoneService:
             raise ValueError(f"{record.status} task cannot be cancelled")
         record.status = "cancelled"
         record.error = None
+        log_event(
+            "task.cancel_requested",
+            task_id=record.id,
+            session_id=record.session_id,
+        )
         run.cancel()
         self.broker.remove_task(task_id)
 
@@ -144,8 +161,9 @@ class WellphoneService:
         for task_id in list(self.tasks):
             self.broker.remove_task(task_id)
 
-    async def _run(self, record: TaskRecord) -> None:
+    async def _run(self, record: TaskRecord, started: float) -> None:
         session = self.sessions[record.session_id]
+        error_type: str | None = None
         try:
             record.answer = await session.prompt(
                 record.id,
@@ -158,14 +176,24 @@ class WellphoneService:
             record.status = "cancelled"
             raise
         except Exception as error:
-            traceback.print_exc()
+            error_type = type(error).__name__
             record.error = str(error)
             record.status = "failed"
         finally:
-            self.store.save(session)
-            # ponytail: retain the closed channel for idempotent HTTP retries;
-            # evict it with its TaskRecord if terminal-task TTL cleanup is added.
-            await self.broker.close_task(record.id)
+            try:
+                self.store.save(session)
+            finally:
+                # ponytail: retain the closed channel for idempotent HTTP retries;
+                # evict it with its TaskRecord if terminal-task TTL cleanup is added.
+                await self.broker.close_task(record.id)
+                log_event(
+                    "task.finished",
+                    task_id=record.id,
+                    session_id=record.session_id,
+                    status=record.status,
+                    duration_ms=round((perf_counter() - started) * 1000),
+                    error_type=error_type,
+                )
 
     def _build_session(
         self,

@@ -1,5 +1,6 @@
 import asyncio
 from dataclasses import replace
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import cast
 
@@ -11,9 +12,10 @@ from geas.ai.apis.openai_completions import (
     _reasoning_delta,
 )
 from geas.ai.providers import builtin_models
-from geas.ai.providers.deepseek import DEEPSEEK_MODELS
+from geas.ai.providers.deepseek import DEEPSEEK_MODELS, _deepseek_cost
 from geas.ai.types import (
     Context,
+    ModelCost,
     ResponseErrorEvent,
     TextContent,
     ThinkingContent,
@@ -86,6 +88,31 @@ def test_deepseek_replays_empty_reasoning_content() -> None:
     converted_message = cast(dict[str, object], converted[0])
 
     assert converted_message["reasoning_content"] == ""
+
+
+def test_builtin_pricing_uses_latest_cny_rates() -> None:
+    off_peak = _deepseek_cost(
+        "deepseek-v4-flash",
+        datetime(2026, 8, 16, 16, tzinfo=UTC),
+    )
+    peak = _deepseek_cost(
+        "deepseek-v4-pro",
+        datetime(2026, 8, 17, 6, tzinfo=UTC),
+    )
+    models = builtin_models()
+    kimi = models.get_model("moonshot", "kimi-k3")
+    qwen = models.get_model("dashscope", "qwen3.7-plus")
+    glm = models.get_model("zai", "glm-5.2")
+
+    assert (off_peak.input, off_peak.output, off_peak.cache_read) == (
+        1.5,
+        4.5,
+        0.05,
+    )
+    assert (peak.input, peak.output, peak.cache_read) == (9.0, 27.0, 0.30)
+    assert kimi is not None and kimi.cost == ModelCost(20, 100, 2, 0)
+    assert qwen is not None and qwen.cost == ModelCost(2, 8, 0.4, 0)
+    assert glm is not None and glm.cost == ModelCost(8, 28, 2, 0)
 
 
 def test_reasoning_delta_uses_first_non_empty_field() -> None:

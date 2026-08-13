@@ -5,11 +5,13 @@ import uvicorn
 from geas.ai.providers import builtin_models
 
 from .config import WellphoneConfig, load_config
+from .observability import configure_logging
 from .server import create_app
 from .service import WellphoneService
 
 
 def main() -> None:
+    configure_logging()
     config = load_config()
     args = _parse_args(config)
     models = builtin_models()

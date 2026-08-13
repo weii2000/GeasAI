@@ -11,9 +11,9 @@ QWEN_MODELS = [
         reasoning=True,
         input=["text"],
         cost=ModelCost(
-            input=0.28,
-            output=1.12,
-            cache_read=0.056,
+            input=2,
+            output=8,
+            cache_read=0.4,
             cache_write=0,
         ),
         context_window=1_000_000,

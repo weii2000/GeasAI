@@ -18,6 +18,7 @@ Wellphone 将“决策”和“执行”分离：
 - **iOS Executor**：校验工具作用域，调用原生 Kit 或构造受限的外部 App 链接；
 - **Job Coordinator**：管理任务状态、取消和 iOS 后台执行生命周期；
 - **Task Lifecycle**：区分运行、等待手机、完成、失败和取消；取消不是错误；
+- **Observability**：以 JSON Lines 记录任务和工具生命周期、关联 ID、状态与耗时；
 - **Pending Action**：持久化邮件、YouTube 与地图结果，由本地通知或 App 内卡片交还用户；
 - **Agent Eval**：使用固定 Tool 结果评估模型的工具选择、参数、安全边界和最终回答；
 - **SwiftUI Client**：提供文字或语音输入、连接配置、进度与最终结果。
@@ -60,6 +61,7 @@ sequenceDiagram
 | agent.py | System Prompt、Tool Schema、YouTube 搜索与 Geas Agent 组装 |
 | broker.py | Tool Call 排队、重投递、超时和结果匹配 |
 | protocol.py | Mac 与 iOS 之间的 JSON 数据契约 |
+| observability.py | 不含业务正文的结构化生命周期日志 |
 | server.py | FastAPI 路由、请求验证和错误映射 |
 | eval.py / eval_cases.json | 真实模型 Agent Eval、确定性评分与代表性案例集 |
 | APIClient.swift | 创建任务、长轮询、回传结果和读取状态 |
@@ -71,6 +73,7 @@ sequenceDiagram
 ## 数据与安全边界
 
 - 原始照片留在 iPhone；模型只接收照片元数据和 OCR 文本；
+- Server 日志不记录 Prompt、OCR、邮件正文或 Tool Result 内容；
 - Session 文件只保存可见对话；原始 OCR 和 Tool Result 在每轮结束后清除；
 - OCR 内容被视为不可信数据，不能作为 Agent 指令；
 - 工具只能操作本次搜索返回的照片和本次任务创建或解析的相册；
