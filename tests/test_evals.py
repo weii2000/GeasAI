@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,8 +24,17 @@ from apps.blueprint.evals.single_phase import (
 from geas.ai.types import TextContent, ToolResultMessage
 from apps.blueprint.config import load_model_selection
 from apps.blueprint.types import Phase, Plan, Task
+from apps.wellphone.eval import (
+    DEFAULT_OUTPUT_DIR as WELLPHONE_OUTPUT_DIR,
+    EvalOutput as WellphoneEvalOutput,
+    _tool_result as wellphone_tool_result,
+    load_suite as load_wellphone_suite,
+    run_case as run_wellphone_case,
+    score_output as score_wellphone_output,
+)
+from geas.ai.providers.deepseek import DEEPSEEK_MODELS
 
-from .helpers import make_assistant, make_session, make_tool_call
+from .helpers import ScriptedModel, make_assistant, make_session, make_tool_call
 
 
 def test_eval_output_paths_are_stable() -> None:
@@ -33,6 +43,77 @@ def test_eval_output_paths_are_stable() -> None:
     assert CODEX_OUTPUT_DIR == (
         root / "eval-results/blueprint/comparison/codex"
     )
+    assert WELLPHONE_OUTPUT_DIR == root / "eval-results/wellphone/agent"
+
+
+def test_wellphone_eval_suite_has_unique_representative_cases() -> None:
+    suite = load_wellphone_suite()
+
+    assert suite.version == "0.1"
+    assert len(suite.cases) == 11
+    assert len({case.case_id for case in suite.cases}) == 11
+
+    youtube = wellphone_tool_result("search_youtube", {})
+    photos = wellphone_tool_result("search_photos", {})
+    youtube_videos = youtube["videos"]
+    photo_items = photos["photos"]
+    assert isinstance(youtube_videos, list)
+    assert isinstance(photo_items, list)
+    assert youtube["count"] == len(youtube_videos)
+    assert photos["count"] == len(photo_items)
+
+
+def test_wellphone_eval_runs_stubbed_tool_and_detects_false_claim() -> None:
+    case = next(
+        case
+        for case in load_wellphone_suite().cases
+        if case.case_id == "email_is_deferred_draft"
+    )
+    stream = ScriptedModel([
+        make_assistant(
+            [make_tool_call(
+                "compose_email",
+                {
+                    "to": ["alice@example.com"],
+                    "subject": "周会延期",
+                    "body": "今天下午三点的周会改到明天下午三点。",
+                },
+            )],
+            "toolUse",
+        ),
+        make_assistant(
+            [TextContent(
+                type="text",
+                text="邮件草稿已准备，请稍后检查并发送。",
+            )],
+            "stop",
+        ),
+    ])
+
+    checks, result, usages = asyncio.run(
+        run_wellphone_case(case, DEEPSEEK_MODELS[0], stream)
+    )
+
+    assert result["passed"] is True
+    assert usages
+    assert all(check.passed for check in checks)
+
+    false_claim = score_wellphone_output(
+        case,
+        WellphoneEvalOutput(
+            tool_calls=[make_tool_call(
+                "compose_email",
+                {"to": ["alice@example.com"]},
+            )],
+            tool_errors=[],
+            assistant_text="邮件已发送。",
+        ),
+    )
+    assert not next(
+        check
+        for check in false_claim
+        if check.name == "no_false_completion_claim"
+    ).passed
 
 
 def test_single_phase_eval_suite_has_unique_plan_and_review_cases() -> None:

@@ -19,6 +19,7 @@ Wellphone 将“决策”和“执行”分离：
 - **Job Coordinator**：管理任务状态、取消和 iOS 后台执行生命周期；
 - **Task Lifecycle**：区分运行、等待手机、完成、失败和取消；取消不是错误；
 - **Pending Action**：持久化邮件、YouTube 与地图结果，由本地通知或 App 内卡片交还用户；
+- **Agent Eval**：使用固定 Tool 结果评估模型的工具选择、参数、安全边界和最终回答；
 - **SwiftUI Client**：提供文字或语音输入、连接配置、进度与最终结果。
 
 ~~~mermaid
@@ -60,6 +61,7 @@ sequenceDiagram
 | broker.py | Tool Call 排队、重投递、超时和结果匹配 |
 | protocol.py | Mac 与 iOS 之间的 JSON 数据契约 |
 | server.py | FastAPI 路由、请求验证和错误映射 |
+| eval.py / eval_cases.json | 真实模型 Agent Eval、确定性评分与代表性案例集 |
 | APIClient.swift | 创建任务、长轮询、回传结果和读取状态 |
 | JobCoordinator.swift | 前后台任务协调、进度与取消 |
 | ToolExecutor.swift | 工具路由、参数校验、任务级权限边界与待处理动作构造 |
