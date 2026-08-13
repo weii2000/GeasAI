@@ -120,7 +120,7 @@ final class JobCoordinator {
                 try await run(prompt: cleanPrompt, client: client)
             } catch is CancellationError {
                 status = "任务已取消"
-                finishRunningActivity(as: .failed, detail: "已取消")
+                finishRunningActivity(as: .cancelled, detail: "已取消")
                 await cancelOnServerIfNeeded()
                 finish(success: false)
             } catch {
@@ -191,6 +191,11 @@ final class JobCoordinator {
                 return
             case .failed:
                 throw WellphoneError.server(current.error ?? "Agent 任务失败")
+            case .cancelled:
+                status = "任务已取消"
+                finishRunningActivity(as: .cancelled, detail: "已取消")
+                finish(success: false)
+                return
             case .running, .waitingForPhone:
                 break
             }
@@ -477,6 +482,9 @@ final class JobCoordinator {
         runTask = nil
         client = nil
         serverTaskID = nil
+        if !success {
+            runActions = []
+        }
 
         if let task = backgroundTask {
             if success {

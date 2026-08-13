@@ -17,6 +17,7 @@ Wellphone 将“决策”和“执行”分离：
 - **Server Tool**：使用只保存在 Mac 的凭据调用 YouTube Data API；
 - **iOS Executor**：校验工具作用域，调用原生 Kit 或构造受限的外部 App 链接；
 - **Job Coordinator**：管理任务状态、取消和 iOS 后台执行生命周期；
+- **Task Lifecycle**：区分运行、等待手机、完成、失败和取消；取消不是错误；
 - **Pending Action**：持久化邮件、YouTube 与地图结果，由本地通知或 App 内卡片交还用户；
 - **SwiftUI Client**：提供文字或语音输入、连接配置、进度与最终结果。
 

@@ -103,8 +103,8 @@ def test_task_creation_is_idempotent_and_session_is_single_run(tmp_path: Path) -
         service.cancel_task(task_id, device_id)
         await asyncio.gather(running, return_exceptions=True)
         await asyncio.sleep(0)
-        assert first.status == "failed"
-        assert first.error == "task cancelled"
+        assert first.status == "cancelled"
+        assert first.error is None
         assert service.sessions[first.session_id].active_task_id is None
         await service.close()
 
@@ -145,6 +145,8 @@ def test_tool_call_survives_poll_retry_and_run_closes_broker(tmp_path: Path) -> 
         await asyncio.sleep(0)
         assert record.status == "completed"
         assert record.answer == "整理完成"
+        with pytest.raises(ValueError, match="completed task cannot be cancelled"):
+            service.cancel_task(record.id, device_id)
         assert await service.broker.next_call(record.id, wait_seconds=0.01) is None
         service.broker.submit_result(record.id, result)
         with pytest.raises(ValueError, match="task is closed"):
@@ -193,8 +195,8 @@ def test_cancel_while_waiting_for_phone_unblocks_agent(tmp_path: Path) -> None:
         await asyncio.sleep(0)
 
         assert running.cancelled()
-        assert record.status == "failed"
-        assert record.error == "task cancelled"
+        assert record.status == "cancelled"
+        assert record.error is None
         assert service.sessions[record.session_id].active_task_id is None
         with pytest.raises(KeyError, match="unknown task"):
             await service.broker.next_call(record.id, wait_seconds=0.01)
@@ -226,8 +228,8 @@ def test_cancel_during_model_response_unblocks_agent(tmp_path: Path) -> None:
         await asyncio.sleep(0)
 
         assert running.cancelled()
-        assert record.status == "failed"
-        assert record.error == "task cancelled"
+        assert record.status == "cancelled"
+        assert record.error is None
         assert service.sessions[record.session_id].active_task_id is None
         await service.close()
 
@@ -262,6 +264,8 @@ def test_model_error_reaches_task_record(tmp_path: Path) -> None:
 
         assert record.status == "failed"
         assert record.error == "provider unavailable"
+        with pytest.raises(ValueError, match="failed task cannot be cancelled"):
+            service.cancel_task(record.id, device_id)
         assert service.sessions[record.session_id].active_task_id is None
         await service.close()
 
@@ -345,6 +349,10 @@ def test_http_retry_returns_same_task_and_hides_other_devices(tmp_path: Path) ->
             f"/tasks/{task_id}",
             headers={"X-Wellphone-Device-ID": device_id},
         )
+        cancelled_task = client.get(
+            f"/tasks/{task_id}",
+            headers={"X-Wellphone-Device-ID": device_id},
+        )
         missing = client.get(
             "/tasks/missing",
             headers={"X-Wellphone-Device-ID": device_id},
@@ -360,6 +368,8 @@ def test_http_retry_returns_same_task_and_hides_other_devices(tmp_path: Path) ->
         assert hidden.status_code == 404
         assert hidden.json() == {"error": f"unknown task: {task_id}"}
         assert cancelled.json() == cancelled_again.json() == {"cancelled": True}
+        assert cancelled_task.json()["status"] == "cancelled"
+        assert cancelled_task.json()["error"] is None
         assert missing.status_code == 404
         assert invalid.status_code == 422
         assert invalid.json() == {"error": "request validation failed"}

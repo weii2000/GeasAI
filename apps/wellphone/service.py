@@ -105,13 +105,13 @@ class WellphoneService:
         record = self.require_task(task_id, device_id)
         run = self._runs.get(task_id)
         if run is None or run.done():
-            if record.status == "completed":
-                raise ValueError("completed task cannot be cancelled")
-            return
+            if record.status == "cancelled":
+                return
+            raise ValueError(f"{record.status} task cannot be cancelled")
+        record.status = "cancelled"
+        record.error = None
         run.cancel()
         self.broker.remove_task(task_id)
-        record.error = "task cancelled"
-        record.status = "failed"
 
     def require_task(self, task_id: str, device_id: str) -> TaskRecord:
         try:
@@ -154,8 +154,8 @@ class WellphoneService:
             )
             record.status = "completed"
         except asyncio.CancelledError:
-            record.error = "task cancelled"
-            record.status = "failed"
+            record.error = None
+            record.status = "cancelled"
             raise
         except Exception as error:
             traceback.print_exc()
@@ -185,7 +185,11 @@ class WellphoneService:
 
     def _set_task_status(self, task_id: str, status: TaskStatus) -> None:
         record = self.tasks.get(task_id)
-        if record is not None and record.status not in ("completed", "failed"):
+        if record is not None and record.status not in (
+            "completed",
+            "failed",
+            "cancelled",
+        ):
             record.status = status
 
     def _finish_run(

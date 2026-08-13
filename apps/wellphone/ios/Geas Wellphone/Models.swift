@@ -72,6 +72,7 @@ struct ServerTask: Codable, Sendable {
         case waitingForPhone = "waiting_for_phone"
         case completed
         case failed
+        case cancelled
     }
 
     let id: String
@@ -108,6 +109,7 @@ struct TaskActivity: Identifiable, Sendable {
         case running
         case completed
         case failed
+        case cancelled
     }
 
     let id: String

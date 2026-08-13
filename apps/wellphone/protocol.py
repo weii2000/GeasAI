@@ -7,7 +7,13 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 
-TaskStatus = Literal["running", "waiting_for_phone", "completed", "failed"]
+TaskStatus = Literal[
+    "running",
+    "waiting_for_phone",
+    "completed",
+    "failed",
+    "cancelled",
+]
 
 
 class CreateTaskRequest(BaseModel):

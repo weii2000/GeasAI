@@ -373,6 +373,9 @@ private struct TaskActivityCard: View {
         case .failed:
             Image(systemName: "xmark.circle.fill")
                 .foregroundStyle(.red)
+        case .cancelled:
+            Image(systemName: "minus.circle.fill")
+                .foregroundStyle(.secondary)
         }
     }
 }
