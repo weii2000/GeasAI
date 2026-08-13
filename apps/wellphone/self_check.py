@@ -307,7 +307,15 @@ def check_youtube_result() -> None:
         }
     )
     assert result["count"] == 1
-    assert result["videos"][0]["title"] == "Agents & Tools"
+    videos = result["videos"]
+    assert isinstance(videos, list)
+    assert videos[0]["title"] == "Agents & Tools"
+    try:
+        _youtube_result({"items": "invalid"})
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("invalid YouTube JSON must be rejected")
 
 
 def main() -> None:

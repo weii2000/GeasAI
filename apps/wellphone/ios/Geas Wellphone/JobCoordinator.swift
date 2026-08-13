@@ -1,6 +1,8 @@
 @preconcurrency import BackgroundTasks
 import Foundation
 import Observation
+import UIKit
+import UserNotifications
 
 @MainActor
 @Observable
@@ -23,10 +25,17 @@ final class JobCoordinator {
     )
     private(set) var pendingApproval: ToolApproval?
     private(set) var mailDraft: MailDraft?
+    private(set) var pendingActions: [PendingAction] = {
+        guard let data = UserDefaults.standard.data(forKey: "wellphone.pendingActions") else {
+            return []
+        }
+        return (try? JSONDecoder().decode([PendingAction].self, from: data)) ?? []
+    }()
 
     private let deviceID = DeviceIdentity.loadOrCreate()
     private let executor = ToolExecutor()
     private let scheduler = BGTaskScheduler.shared
+    private let notificationCenter = UNUserNotificationCenter.current()
     private let backgroundIdentifier: String
     private var registered = false
     private var runTask: Task<Void, Never>?
@@ -35,10 +44,11 @@ final class JobCoordinator {
     private var backgroundTask: BGContinuedProcessingTask?
     private var completedSteps: Int64 = 0
     private var approvalContinuation: CheckedContinuation<Bool, Never>?
+    private var runActions: [PendingAction] = []
 
     init() {
         let bundleID = Bundle.main.bundleIdentifier ?? "com.example.Wellphone"
-        backgroundIdentifier = "\(bundleID).photo-agent"
+        backgroundIdentifier = "\(bundleID).wellphone-task"
         registerBackgroundTask()
     }
 
@@ -98,10 +108,13 @@ final class JobCoordinator {
             )
         ]
         completedSteps = 0
+        runActions = []
         executor.resetScope()
 
         runTask = Task {
             do {
+                try await prepareBackgroundExecution()
+                await requestNotificationAuthorization()
                 let client = try APIClient(baseURL: url, deviceID: deviceID)
                 self.client = client
                 try await run(prompt: cleanPrompt, client: client)
@@ -171,7 +184,9 @@ final class JobCoordinator {
                 answer = current.answer ?? "任务已完成。"
                 finishRunningActivity(as: .completed)
                 await syncSessionIfPossible()
-                status = mailDraft == nil ? "已完成" : "邮件草稿已准备，请确认发送"
+                let actions = publishRunActions()
+                await notify(actions)
+                status = actions.isEmpty ? "已完成" : "已完成，等待你处理"
                 finish(success: true)
                 return
             case .failed:
@@ -188,12 +203,6 @@ final class JobCoordinator {
             finishRunningActivity(as: .completed)
             let toolName = displayName(for: call.name)
             updateActivity(id: call.callID, title: toolName, state: .running)
-            if call.name != "compose_email",
-               !call.name.hasPrefix("open_"),
-               backgroundTask == nil {
-                status = "正在启动后台任务…"
-                try await submitBackgroundTask()
-            }
             status = "正在执行：\(toolName)"
             let result = await executor.execute(
                 call,
@@ -209,8 +218,8 @@ final class JobCoordinator {
                 approve: { approval in
                     await self.requestApproval(approval)
                 },
-                onMailDraft: { draft in
-                    self.mailDraft = draft
+                onPendingAction: { action in
+                    self.prepareAction(action)
                 }
             )
             try Task.checkCancellation()
@@ -258,6 +267,42 @@ final class JobCoordinator {
         messages = session.messages
     }
 
+    func performPendingAction(id: String) async {
+        guard let action = pendingActions.first(where: { $0.id == id }) else {
+            return
+        }
+        switch action.kind {
+        case .mail:
+            guard let draft = action.mailDraft else { return }
+            mailDraft = draft
+            removePendingAction(id: id)
+        case .url:
+            guard let url = action.url,
+                  url.scheme == "https",
+                  ["www.google.com", "www.youtube.com"].contains(url.host),
+                  await UIApplication.shared.open(url) else {
+                errorMessage = WellphoneError.externalAppUnavailable.localizedDescription
+                return
+            }
+            removePendingAction(id: id)
+        }
+    }
+
+    func dismissPendingAction(id: String) {
+        removePendingAction(id: id)
+    }
+
+    func consumeSelectedNotification() async {
+        let defaults = UserDefaults.standard
+        guard let id = defaults.string(
+            forKey: WellphoneNotification.selectedActionKey
+        ) else {
+            return
+        }
+        defaults.removeObject(forKey: WellphoneNotification.selectedActionKey)
+        await performPendingAction(id: id)
+    }
+
     private func registerBackgroundTask() {
         guard !registered else { return }
         registered = scheduler.register(
@@ -300,6 +345,78 @@ final class JobCoordinator {
             }
             try await Task.sleep(for: .milliseconds(50))
         }
+    }
+
+    private func prepareBackgroundExecution() async throws {
+        do {
+            try await submitBackgroundTask()
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            updateActivity(
+                id: "background",
+                title: "后台执行暂不可用",
+                detail: "请暂时保持 Wellphone 打开",
+                state: .failed
+            )
+        }
+    }
+
+    private func requestNotificationAuthorization() async {
+        _ = try? await notificationCenter.requestAuthorization(
+            options: [.alert, .sound]
+        )
+    }
+
+    private func prepareAction(_ action: PendingAction) {
+        if let index = runActions.firstIndex(where: { $0.id == action.id }) {
+            runActions[index] = action
+        } else {
+            runActions.append(action)
+        }
+    }
+
+    private func publishRunActions() -> [PendingAction] {
+        for action in runActions {
+            if let index = pendingActions.firstIndex(where: { $0.id == action.id }) {
+                pendingActions[index] = action
+            } else {
+                pendingActions.append(action)
+            }
+        }
+        savePendingActions()
+        let actions = runActions
+        runActions = []
+        return actions
+    }
+
+    private func notify(_ actions: [PendingAction]) async {
+        for action in actions {
+            let content = UNMutableNotificationContent()
+            content.title = action.title
+            content.body = action.detail
+            content.sound = .default
+            content.categoryIdentifier = WellphoneNotification.categoryID
+            content.userInfo = [WellphoneNotification.actionIDKey: action.id]
+            try? await notificationCenter.add(
+                UNNotificationRequest(
+                    identifier: action.id,
+                    content: content,
+                    trigger: nil
+                )
+            )
+        }
+    }
+
+    private func removePendingAction(id: String) {
+        pendingActions.removeAll { $0.id == id }
+        savePendingActions()
+        notificationCenter.removeDeliveredNotifications(withIdentifiers: [id])
+    }
+
+    private func savePendingActions() {
+        guard let data = try? JSONEncoder().encode(pendingActions) else { return }
+        UserDefaults.standard.set(data, forKey: "wellphone.pendingActions")
     }
 
     private func attach(_ task: BGContinuedProcessingTask) {
@@ -395,9 +512,9 @@ final class JobCoordinator {
         case "set_photo_location": "修改照片位置"
         case "delete_photos": "删除照片"
         case "compose_email": "准备邮件草稿"
-        case "open_youtube_video": "打开 YouTube 视频"
-        case "open_google_maps_search": "打开地图搜索"
-        case "open_google_maps_directions": "打开路线规划"
+        case "open_youtube_video": "准备 YouTube 视频"
+        case "open_google_maps_search": "准备地图搜索"
+        case "open_google_maps_directions": "准备路线规划"
         default: tool
         }
     }

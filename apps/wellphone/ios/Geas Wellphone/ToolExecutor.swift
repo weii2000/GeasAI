@@ -1,6 +1,5 @@
 import Foundation
 import MessageUI
-import UIKit
 
 @MainActor
 final class ToolExecutor {
@@ -31,7 +30,7 @@ final class ToolExecutor {
         _ call: ToolCall,
         onProgress: (String) -> Void = { _ in },
         approve: (ToolApproval) async -> Bool = { _ in false },
-        onMailDraft: (MailDraft) -> Void = { _ in }
+        onPendingAction: (PendingAction) -> Void = { _ in }
     ) async -> ToolResultRequest {
         do {
             if photoToolNames.contains(call.name) {
@@ -39,10 +38,11 @@ final class ToolExecutor {
             }
             let result = try await execute(
                 name: call.name,
+                actionID: call.callID,
                 arguments: call.arguments,
                 onProgress: onProgress,
                 approve: approve,
-                onMailDraft: onMailDraft
+                onPendingAction: onPendingAction
             )
             return ToolResultRequest(callID: call.callID, result: result, isError: false)
         } catch {
@@ -56,10 +56,11 @@ final class ToolExecutor {
 
     private func execute(
         name: String,
+        actionID: String,
         arguments: [String: JSONValue],
         onProgress: (String) -> Void,
         approve: (ToolApproval) async -> Bool,
-        onMailDraft: (MailDraft) -> Void
+        onPendingAction: (PendingAction) -> Void
     ) async throws -> [String: JSONValue] {
         switch name {
         case "search_photos":
@@ -341,13 +342,24 @@ final class ToolExecutor {
                 throw WellphoneError.mailUnavailable
             }
             let draft = MailDraft(
+                id: actionID,
                 to: try recipients(arguments.requiredStrings("to")),
                 cc: try recipients(arguments.optionalStrings("cc")),
                 bcc: try recipients(arguments.optionalStrings("bcc")),
                 subject: try arguments.requiredString("subject"),
                 body: try arguments.requiredString("body")
             )
-            onMailDraft(draft)
+            onPendingAction(
+                PendingAction(
+                    id: actionID,
+                    kind: .mail,
+                    title: "邮件草稿已准备",
+                    detail: draft.subject,
+                    buttonTitle: "检查邮件",
+                    url: nil,
+                    mailDraft: draft
+                )
+            )
             return [
                 "prepared": .bool(true),
                 "requires_user_send": .bool(true),
@@ -366,16 +378,25 @@ final class ToolExecutor {
             }
             var components = URLComponents(string: "https://www.youtube.com/watch")!
             components.queryItems = [URLQueryItem(name: "v", value: videoID)]
-            try await requireApproval(
-                ToolApproval(
-                    title: "打开 YouTube？",
-                    message: title,
-                    destructive: false
-                ),
-                approve
+            guard let url = components.url else {
+                throw WellphoneError.invalidArguments("无法生成 YouTube 链接")
+            }
+            onPendingAction(
+                PendingAction(
+                    id: actionID,
+                    kind: .url,
+                    title: "YouTube 视频已准备",
+                    detail: title,
+                    buttonTitle: "在 YouTube 中打开",
+                    url: url,
+                    mailDraft: nil
+                )
             )
-            try await openExternalURL(components.url)
-            return ["opened": .bool(true), "video_id": .string(videoID)]
+            return [
+                "prepared": .bool(true),
+                "requires_user_open": .bool(true),
+                "video_id": .string(videoID),
+            ]
 
         case "open_google_maps_search":
             let query = try arguments.requiredString("query")
@@ -383,16 +404,22 @@ final class ToolExecutor {
                 path: "/maps/search/",
                 items: [URLQueryItem(name: "query", value: query)]
             )
-            try await requireApproval(
-                ToolApproval(
-                    title: "在 Google Maps 中搜索？",
-                    message: query,
-                    destructive: false
-                ),
-                approve
+            onPendingAction(
+                PendingAction(
+                    id: actionID,
+                    kind: .url,
+                    title: "地图搜索已准备",
+                    detail: query,
+                    buttonTitle: "在 Google Maps 中打开",
+                    url: url,
+                    mailDraft: nil
+                )
             )
-            try await openExternalURL(url)
-            return ["opened": .bool(true), "query": .string(query)]
+            return [
+                "prepared": .bool(true),
+                "requires_user_open": .bool(true),
+                "query": .string(query),
+            ]
 
         case "open_google_maps_directions":
             let destination = try arguments.requiredString("destination")
@@ -408,16 +435,22 @@ final class ToolExecutor {
                 items.append(URLQueryItem(name: "origin", value: origin))
             }
             let url = try mapsURL(path: "/maps/dir/", items: items)
-            try await requireApproval(
-                ToolApproval(
-                    title: "在 Google Maps 中规划路线？",
-                    message: "目的地：\(destination)",
-                    destructive: false
-                ),
-                approve
+            onPendingAction(
+                PendingAction(
+                    id: actionID,
+                    kind: .url,
+                    title: "路线已准备",
+                    detail: "目的地：\(destination)",
+                    buttonTitle: "在 Google Maps 中打开",
+                    url: url,
+                    mailDraft: nil
+                )
             )
-            try await openExternalURL(url)
-            return ["opened": .bool(true), "destination": .string(destination)]
+            return [
+                "prepared": .bool(true),
+                "requires_user_open": .bool(true),
+                "destination": .string(destination),
+            ]
 
         default:
             throw WellphoneError.invalidArguments("未知工具 \(name)")
@@ -496,9 +529,4 @@ final class ToolExecutor {
         return url
     }
 
-    private func openExternalURL(_ url: URL?) async throws {
-        guard let url, await UIApplication.shared.open(url) else {
-            throw WellphoneError.externalAppUnavailable
-        }
-    }
 }

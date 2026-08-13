@@ -5,7 +5,7 @@ Wellphone 是建立在 Geas Runtime 上的 iOS Capability Agent。它不模拟�
 
 当前实现覆盖照片管理、邮件起草和受控的外部服务跳转：模型负责理解意图和规划
 步骤，Mac 调用 YouTube Data API 搜索公开视频；iPhone 通过 PhotoKit、Vision 和
-MessageUI 执行本地能力，并在用户确认后打开 YouTube 或 Google Maps。
+MessageUI 执行本地能力；需要切换 App 的结果会保存为待处理动作，并在任务完成后通知用户。
 
 ## 架构
 
@@ -17,6 +17,7 @@ Wellphone 将“决策”和“执行”分离：
 - **Server Tool**：使用只保存在 Mac 的凭据调用 YouTube Data API；
 - **iOS Executor**：校验工具作用域，调用原生 Kit 或构造受限的外部 App 链接；
 - **Job Coordinator**：管理任务状态、取消和 iOS 后台执行生命周期；
+- **Pending Action**：持久化邮件、YouTube 与地图结果，由本地通知或 App 内卡片交还用户；
 - **SwiftUI Client**：提供文字或语音输入、连接配置、进度与最终结果。
 
 ~~~mermaid
@@ -60,9 +61,9 @@ sequenceDiagram
 | server.py | FastAPI 路由、请求验证和错误映射 |
 | APIClient.swift | 创建任务、长轮询、回传结果和读取状态 |
 | JobCoordinator.swift | 前后台任务协调、进度与取消 |
-| ToolExecutor.swift | 工具路由、参数校验、任务级权限边界与外部 App 跳转 |
+| ToolExecutor.swift | 工具路由、参数校验、任务级权限边界与待处理动作构造 |
 | PhotoService.swift | PhotoKit 查询、相册和照片属性修改与 Vision OCR |
-| ContentView.swift | 对话界面、操作审批和系统 Mail Composer |
+| ContentView.swift | 对话界面、待处理动作、操作审批和系统 Mail Composer |
 
 ## 数据与安全边界
 
@@ -73,7 +74,7 @@ sequenceDiagram
 - 删除、隐藏、改日期/位置和移出相册等高风险操作必须在手机端再次确认；
 - 邮件工具只填充系统 Mail Composer，最终发送权始终属于用户；
 - YouTube API Key 只保存在 Mac；Google Maps 与 YouTube 跳转只允许固定 HTTPS 域名；
-- 打开外部 App 前必须由用户确认，Agent 不能静默切换前台应用；
+- 邮件与外部 App 动作只在用户点击通知或卡片后打开，Agent 不能静默切换前台应用；
 - 客户端生成任务 UUID，Tool Call 在结果确认前可重复获取，降低断网造成的重复执行；
 - 每台设备生成独立 ID 并只能访问所属 Session；该 ID 用于原型隔离，不等同于公网认证；
 - 后台执行依赖 iOS 调度，系统终止 App 后不保证继续运行。

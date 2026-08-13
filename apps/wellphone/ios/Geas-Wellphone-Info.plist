@@ -4,7 +4,7 @@
 <dict>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
-		<string>$(PRODUCT_BUNDLE_IDENTIFIER).photo-agent</string>
+		<string>$(PRODUCT_BUNDLE_IDENTIFIER).wellphone-task</string>
 	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>

@@ -43,13 +43,14 @@ Rules:
 - Additive album operations are idempotent. The phone asks the user before
   risky changes such as deletion, hiding, metadata edits, or album removal.
   If the user declines an operation, do not request it again in the same run.
-- compose_email only prepares the native Mail composer. Never claim that a
-  message was sent; the user must review it and tap Send in Apple's UI.
+- compose_email prepares a deferred Mail action. Never claim that a message
+  was opened or sent; the user receives it after completion, then reviews it
+  and taps Send in Apple's UI.
 - search_youtube searches public videos. YouTube's official API cannot add to
   Watch Later; explain that limitation and offer to open a selected video.
-- Opening YouTube or Google Maps requires phone confirmation and takes the user
-  to that app. Use Google Maps URLs for search and directions; omit origin to
-  let Maps use the phone's current location.
+- open_youtube_video and open_google_maps_* prepare deferred actions. Tell the
+  user the action is ready, not already opened. Wellphone notifies the user,
+  who chooses when to open it. Omit a Maps origin to use the phone's location.
 - Verify changed photo or album state when the corresponding read tool exists.
   Report counts, skipped items, and errors without exposing raw OCR needlessly.
 """
@@ -75,7 +76,7 @@ TOOL_SPECS: tuple[tuple[str, str, dict[str, object]], ...] = (
     ),
     (
         "open_youtube_video",
-        "Ask the phone to open one YouTube video selected from search results.",
+        "Prepare a deferred handoff for one YouTube video from search results.",
         {
             "type": "object",
             "properties": {
@@ -88,7 +89,7 @@ TOOL_SPECS: tuple[tuple[str, str, dict[str, object]], ...] = (
     ),
     (
         "open_google_maps_search",
-        "Ask the phone to open Google Maps with a place search.",
+        "Prepare a deferred Google Maps place-search handoff.",
         {
             "type": "object",
             "properties": {
@@ -100,7 +101,7 @@ TOOL_SPECS: tuple[tuple[str, str, dict[str, object]], ...] = (
     ),
     (
         "open_google_maps_directions",
-        "Ask the phone to open Google Maps directions. Omit origin for current location.",
+        "Prepare deferred Google Maps directions. Omit origin for current location.",
         {
             "type": "object",
             "properties": {
@@ -442,8 +443,16 @@ async def _search_youtube(arguments: dict[str, object]) -> AgentToolResult:
     api_key = os.getenv("YOUTUBE_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError("Mac Server 未配置 YOUTUBE_API_KEY")
-    query = str(arguments["query"])
-    max_results = int(arguments["max_results"])
+    query = arguments.get("query")
+    max_results = arguments.get("max_results")
+    if not isinstance(query, str) or not query.strip():
+        raise ValueError("query must be a non-empty string")
+    if (
+        not isinstance(max_results, int)
+        or isinstance(max_results, bool)
+        or not 1 <= max_results <= 5
+    ):
+        raise ValueError("max_results must be an integer between 1 and 5")
     try:
         data = await asyncio.to_thread(
             _youtube_request,
@@ -488,20 +497,38 @@ def _youtube_request(
     return _youtube_result(payload)
 
 
-def _youtube_result(payload: dict[str, object]) -> dict[str, object]:
-    videos = []
-    for item in payload.get("items", []):
-        video_id = item.get("id", {}).get("videoId")
-        snippet = item.get("snippet", {})
-        if not video_id:
+def _youtube_result(payload: object) -> dict[str, object]:
+    if not isinstance(payload, dict):
+        raise RuntimeError("YouTube API 返回了无效数据")
+    items = payload.get("items")
+    if not isinstance(items, list):
+        raise RuntimeError("YouTube API 返回了无效数据")
+
+    videos: list[dict[str, object]] = []
+    for item in items:
+        if not isinstance(item, dict):
             continue
+        identity = item.get("id")
+        snippet = item.get("snippet")
+        if not isinstance(identity, dict) or not isinstance(snippet, dict):
+            continue
+        video_id = identity.get("videoId")
+        if not isinstance(video_id, str):
+            continue
+
+        title = snippet.get("title")
+        channel = snippet.get("channelTitle")
+        published_at = snippet.get("publishedAt")
+        thumbnails = snippet.get("thumbnails")
+        medium = thumbnails.get("medium") if isinstance(thumbnails, dict) else None
+        thumbnail_url = medium.get("url") if isinstance(medium, dict) else None
         videos.append(
             {
                 "video_id": video_id,
-                "title": html.unescape(snippet.get("title", "")),
-                "channel": html.unescape(snippet.get("channelTitle", "")),
-                "published_at": snippet.get("publishedAt"),
-                "thumbnail_url": snippet.get("thumbnails", {}).get("medium", {}).get("url"),
+                "title": html.unescape(title) if isinstance(title, str) else "",
+                "channel": html.unescape(channel) if isinstance(channel, str) else "",
+                "published_at": published_at if isinstance(published_at, str) else None,
+                "thumbnail_url": thumbnail_url if isinstance(thumbnail_url, str) else None,
                 "url": f"https://www.youtube.com/watch?v={video_id}",
             }
         )

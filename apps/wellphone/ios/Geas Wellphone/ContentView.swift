@@ -1,4 +1,5 @@
 import AVFoundation
+import Combine
 import MessageUI
 import Observation
 import Speech
@@ -9,6 +10,7 @@ struct ContentView: View {
     @State private var prompt = ""
     @State private var speech = SpeechInput()
     @FocusState private var composerFocused: Bool
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack {
@@ -36,6 +38,20 @@ struct ContentView: View {
                                 )
                             }
 
+                            ForEach(coordinator.pendingActions) { action in
+                                PendingActionCard(
+                                    action: action,
+                                    onOpen: {
+                                        Task {
+                                            await coordinator.performPendingAction(id: action.id)
+                                        }
+                                    },
+                                    onDismiss: {
+                                        coordinator.dismissPendingAction(id: action.id)
+                                    }
+                                )
+                            }
+
                             Color.clear
                                 .frame(height: 1)
                                 .id("conversation-bottom")
@@ -46,7 +62,11 @@ struct ContentView: View {
                     .simultaneousGesture(
                         TapGesture().onEnded { composerFocused = false }
                     )
-                    .onChange(of: coordinator.messages.count + coordinator.activities.count) {
+                    .onChange(
+                        of: coordinator.messages.count
+                            + coordinator.activities.count
+                            + coordinator.pendingActions.count
+                    ) {
                         withAnimation {
                             proxy.scrollTo("conversation-bottom", anchor: .bottom)
                         }
@@ -120,7 +140,20 @@ struct ContentView: View {
                     .disabled(coordinator.isRunning)
                 }
             }
-            .task { await coordinator.restoreSession() }
+            .task {
+                await coordinator.consumeSelectedNotification()
+                await coordinator.restoreSession()
+            }
+            .onChange(of: scenePhase) {
+                guard scenePhase == .active else { return }
+                Task { await coordinator.consumeSelectedNotification() }
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(for: WellphoneNotification.selected)
+            ) { _ in
+                guard scenePhase == .active else { return }
+                Task { await coordinator.consumeSelectedNotification() }
+            }
             .onDisappear { speech.stop() }
             .alert(
                 coordinator.pendingApproval?.title ?? "确认操作",
@@ -179,6 +212,44 @@ struct ContentView: View {
         composerFocused = false
         speech.stop()
         coordinator.start(prompt: text)
+    }
+}
+
+private struct PendingActionCard: View {
+    let action: PendingAction
+    let onOpen: () -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: action.kind == .mail ? "envelope.fill" : "arrow.up.forward.app.fill")
+                    .foregroundStyle(.tint)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(action.title)
+                        .font(.subheadline.weight(.semibold))
+                    Text(action.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer()
+                Button("忽略", systemImage: "xmark", action: onDismiss)
+                    .labelStyle(.iconOnly)
+                    .foregroundStyle(.secondary)
+            }
+
+            Button(action.buttonTitle, action: onOpen)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(
+            Color(.secondarySystemGroupedBackground),
+            in: RoundedRectangle(cornerRadius: 16)
+        )
+        .padding(.horizontal)
     }
 }
 

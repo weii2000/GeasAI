@@ -210,13 +210,36 @@ struct AlbumSummary: Sendable {
     }
 }
 
-struct MailDraft: Identifiable, Sendable {
-    let id = UUID()
+struct MailDraft: Codable, Identifiable, Sendable {
+    let id: String
     let to: [String]
     let cc: [String]
     let bcc: [String]
     let subject: String
     let body: String
+}
+
+struct PendingAction: Codable, Identifiable, Sendable {
+    enum Kind: String, Codable, Sendable {
+        case mail
+        case url
+    }
+
+    let id: String
+    let kind: Kind
+    let title: String
+    let detail: String
+    let buttonTitle: String
+    let url: URL?
+    let mailDraft: MailDraft?
+}
+
+enum WellphoneNotification {
+    static let categoryID = "WELLPHONE_PENDING_ACTION"
+    static let openActionID = "OPEN_PENDING_ACTION"
+    static let actionIDKey = "action_id"
+    static let selected = Notification.Name("WellphoneNotificationSelected")
+    static let selectedActionKey = "wellphone.selectedNotificationAction"
 }
 
 struct ToolApproval: Identifiable, Sendable {
