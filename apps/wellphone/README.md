@@ -3,14 +3,16 @@
 Wellphone 是建立在 Geas Runtime 上的 iOS Capability Agent。它不模拟点击或接管
 屏幕，而是让 Agent 调用 iOS 原生能力，在用户继续使用手机时处理后台数据任务。
 
-当前实现聚焦照片整理：模型负责理解意图和规划步骤，iPhone 负责通过 PhotoKit
-查询与写入相册，并使用 Vision 在设备端完成 OCR。
+当前实现聚焦照片管理和邮件起草：模型负责理解意图和规划步骤，iPhone 负责通过
+PhotoKit 查询或修改照片、使用 Vision 在设备端完成 OCR，并通过 MessageUI 展示
+由用户确认发送的邮件草稿。
 
 ## 架构
 
 Wellphone 将“决策”和“执行”分离：
 
 - **Mac Agent Server**：通过 FastAPI 接收任务，复用 geas.ai 和 geas.core 运行 Agent Loop；
+- **Session Store**：按 `device → session → run` 隔离对话，并在 Mac 本地原子持久化可见消息；
 - **Tool Broker**：把同步的 Agent Tool Call 转换为手机可轮询的任务，并等待结果；
 - **iOS Executor**：校验工具作用域，调用 PhotoKit 和 Vision 后返回结构化结果；
 - **Job Coordinator**：管理任务状态、取消和 iOS 后台执行生命周期；
@@ -26,9 +28,9 @@ sequenceDiagram
     participant T as iOS Tool Executor
     participant K as PhotoKit / Vision
 
-    U->>I: 提交自然语言任务
-    I->>S: 创建任务（客户端 UUID）
-    S->>A: 启动 Agent Loop
+    U->>I: 发送一条消息
+    I->>S: device_id + session_id + run UUID
+    S->>A: 在对应 Session 中启动 Agent Loop
     A->>L: Prompt + Tool Schema
     L-->>A: Tool Call
     A->>S: Tool Broker 等待手机
@@ -50,6 +52,7 @@ sequenceDiagram
 | main.py | 加载配置并组装模型、Service 与 FastAPI |
 | config.py | Wellphone 环境配置与启动参数默认值 |
 | service.py | 任务状态、Agent 生命周期与取消 |
+| session.py | 对话上下文、设备归属与 JSON 持久化 |
 | agent.py | System Prompt、Tool Schema 与 Geas Agent 组装 |
 | broker.py | Tool Call 排队、重投递、超时和结果匹配 |
 | protocol.py | Mac 与 iOS 之间的 JSON 数据契约 |
@@ -57,21 +60,25 @@ sequenceDiagram
 | APIClient.swift | 创建任务、长轮询、回传结果和读取状态 |
 | JobCoordinator.swift | 前后台任务协调、进度与取消 |
 | ToolExecutor.swift | 工具路由、参数校验与任务级权限边界 |
-| PhotoService.swift | PhotoKit 查询/写入与 Vision OCR |
+| PhotoService.swift | PhotoKit 查询、相册和照片属性修改与 Vision OCR |
+| ContentView.swift | 对话界面、操作审批和系统 Mail Composer |
 
 ## 数据与安全边界
 
 - 原始照片留在 iPhone；模型只接收照片元数据和 OCR 文本；
+- Session 文件只保存可见对话；原始 OCR 和 Tool Result 在每轮结束后清除；
 - OCR 内容被视为不可信数据，不能作为 Agent 指令；
 - 工具只能操作本次搜索返回的照片和本次任务创建或解析的相册；
-- 当前写操作只有“加入相册”，不删除照片，也不修改照片内容；
+- 删除、隐藏、改日期/位置和移出相册等高风险操作必须在手机端再次确认；
+- 邮件工具只填充系统 Mail Composer，最终发送权始终属于用户；
 - 客户端生成任务 UUID，Tool Call 在结果确认前可重复获取，降低断网造成的重复执行；
+- 每台设备生成独立 ID 并只能访问所属 Session；该 ID 用于原型隔离，不等同于公网认证；
 - 后台执行依赖 iOS 调度，系统终止 App 后不保证继续运行。
 
 ## 当前边界
 
-- 仅实现照片整理，还未接入音乐、日历或第三方服务；
-- Server 状态保存在内存中，不支持重启恢复或多实例；
+- 仅实现照片管理和邮件草稿，还未接入音乐、日历或第三方服务；
+- Session 对话可在 Server 重启后恢复，运行中的任务和 Tool Call 不恢复；
 - HTTP 通道没有认证，只适用于可信局域网原型；
 - App Intents 尚未接入，当前入口仍是 Wellphone App；
 - 照片是否语义匹配最终仍依赖模型判断。

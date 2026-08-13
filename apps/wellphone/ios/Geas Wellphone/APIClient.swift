@@ -1,9 +1,19 @@
 import Foundation
+import Security
 
 actor APIClient {
     private struct CreateTaskRequest: Encodable {
         let id: String
+        let sessionID: String?
         let prompt: String
+        let deviceContext: String
+
+        enum CodingKeys: String, CodingKey {
+            case id
+            case sessionID = "session_id"
+            case prompt
+            case deviceContext = "device_context"
+        }
     }
     private struct ErrorResponse: Decodable { let error: String }
     private struct Acknowledgement: Codable, Sendable {
@@ -12,28 +22,48 @@ actor APIClient {
     }
 
     private let baseURL: URL
+    private let deviceID: String
     private let session: URLSession
 
-    init(baseURL: URL) throws {
+    init(baseURL: URL, deviceID: String) throws {
         guard ["http", "https"].contains(baseURL.scheme?.lowercased()),
               baseURL.host != nil else {
             throw WellphoneError.invalidServerURL
         }
         self.baseURL = baseURL
+        self.deviceID = deviceID
         let configuration = URLSessionConfiguration.default
         configuration.waitsForConnectivity = true
         configuration.timeoutIntervalForRequest = 30
         self.session = URLSession(configuration: configuration)
     }
 
-    func createTask(id: String, prompt: String) async throws -> ServerTask {
-        let body = try JSONEncoder().encode(CreateTaskRequest(id: id, prompt: prompt))
+    func createTask(
+        id: String,
+        sessionID: String?,
+        prompt: String,
+        deviceContext: String
+    ) async throws -> ServerTask {
+        let body = try JSONEncoder().encode(
+            CreateTaskRequest(
+                id: id,
+                sessionID: sessionID,
+                prompt: prompt,
+                deviceContext: deviceContext
+            )
+        )
         return try await retryingNetwork {
             try await request(
                 path: ["tasks"],
                 method: "POST",
                 body: body
             )
+        }
+    }
+
+    func serverSession(id: String) async throws -> ServerSession {
+        try await retryingNetwork {
+            try await request(path: ["sessions", id])
         }
     }
 
@@ -103,6 +133,7 @@ actor APIClient {
         var request = URLRequest(url: url, timeoutInterval: timeout)
         request.httpMethod = method
         request.httpBody = body
+        request.setValue(deviceID, forHTTPHeaderField: "X-Wellphone-Device-ID")
         if body != nil {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
@@ -117,5 +148,36 @@ actor APIClient {
             throw WellphoneError.server(message)
         }
         return try JSONDecoder().decode(Response.self, from: data)
+    }
+}
+
+enum DeviceIdentity {
+    private static let service = "com.geas.wellphone"
+    private static let account = "device-id"
+
+    static func loadOrCreate() -> String {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var item: CFTypeRef?
+        if SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+           let data = item as? Data,
+           let value = String(data: data, encoding: .utf8) {
+            return value
+        }
+
+        let value = UUID().uuidString.lowercased()
+        let data = Data(value.utf8)
+        SecItemAdd([
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecValueData as String: data,
+        ] as CFDictionary, nil)
+        return value
     }
 }

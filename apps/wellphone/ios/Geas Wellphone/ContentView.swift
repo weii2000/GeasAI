@@ -1,4 +1,5 @@
 import AVFoundation
+import MessageUI
 import Observation
 import Speech
 import SwiftUI
@@ -10,156 +11,223 @@ struct ContentView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Wellphone")
-                            .font(.largeTitle.bold())
-                        Text("让 Agent 在后台整理照片")
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.bottom, 4)
-
-                    VStack(alignment: .leading, spacing: 12) {
-                        Label("连接到 Mac", systemImage: "desktopcomputer")
-                            .font(.headline)
-
-                        TextField(
-                            "http://192.168.1.10:8000",
-                            text: $coordinator.serverAddress
-                        )
-                        .textInputAutocapitalization(.never)
-                        .keyboardType(.URL)
-                        .autocorrectionDisabled()
-                        .textFieldStyle(.roundedBorder)
-                        .disabled(coordinator.isRunning)
-                    }
-                    .padding(18)
-                    .background(.background, in: RoundedRectangle(cornerRadius: 20))
-
-                    VStack(alignment: .leading, spacing: 12) {
-                        Label("任务", systemImage: "sparkles")
-                            .font(.headline)
-
-                        ZStack(alignment: .topLeading) {
-                            if prompt.isEmpty {
-                                Text("例如：把今天包含文档的照片整理到工作相册")
-                                    .foregroundStyle(.tertiary)
-                                    .padding(.horizontal, 5)
-                                    .padding(.vertical, 8)
-                            }
-                            TextEditor(text: $prompt)
-                                .scrollContentBackground(.hidden)
-                                .frame(minHeight: 130)
-                                .disabled(coordinator.isRunning)
+            VStack(spacing: 0) {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 12) {
+                        if coordinator.messages.isEmpty {
+                            ContentUnavailableView(
+                                "开始一个任务",
+                                systemImage: "sparkles",
+                                description: Text("整理照片、修改相册，或起草一封邮件。")
+                            )
+                            .padding(.top, 60)
                         }
-                        .padding(8)
-                        .background(
-                            Color(.tertiarySystemGroupedBackground),
-                            in: RoundedRectangle(cornerRadius: 14)
-                        )
-
-                        HStack {
-                            Button {
-                                if speech.isListening {
-                                    speech.stop()
-                                } else {
-                                    Task {
-                                        await speech.start { prompt = $0 }
-                                    }
-                                }
-                            } label: {
-                                Label(
-                                    speech.isListening ? "停止听写" : "语音输入",
-                                    systemImage: speech.isListening
-                                        ? "stop.circle.fill"
-                                        : "mic.fill"
-                                )
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(speech.isListening ? .red : .accentColor)
-                            .disabled(coordinator.isRunning)
-
-                            Spacer()
-
-                            if speech.isListening {
-                                Text("正在听…")
-                                    .font(.caption)
-                                    .foregroundStyle(.red)
-                            }
-                        }
-
-                        if let error = speech.errorMessage {
-                            Text(error)
-                                .font(.caption)
-                                .foregroundStyle(.red)
+                        ForEach(coordinator.messages) { message in
+                            MessageBubble(message: message)
                         }
 
                         if coordinator.isRunning {
-                            Button("取消任务", role: .destructive) {
-                                coordinator.cancel()
-                            }
-                            .buttonStyle(.bordered)
-                            .frame(maxWidth: .infinity)
-                        } else {
-                            Button {
-                                speech.stop()
-                                coordinator.start(prompt: prompt)
-                            } label: {
-                                Label("开始后台整理", systemImage: "play.fill")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.large)
-                            .disabled(
-                                prompt.trimmingCharacters(
-                                    in: .whitespacesAndNewlines
-                                ).isEmpty
-                            )
-                        }
-                    }
-                    .padding(18)
-                    .background(.background, in: RoundedRectangle(cornerRadius: 20))
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        Label("状态", systemImage: "waveform.path.ecg")
-                            .font(.headline)
-
-                        HStack(spacing: 10) {
-                            if coordinator.isRunning {
+                            HStack(spacing: 10) {
                                 ProgressView()
+                                Text(coordinator.status)
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
                             }
-                            Text(coordinator.status)
-                        }
-
-                        if !coordinator.answer.isEmpty {
-                            Divider()
-                            Text(coordinator.answer)
-                                .foregroundStyle(.secondary)
+                            .padding(.horizontal)
                         }
 
                         if let error = coordinator.errorMessage {
                             Text(error)
                                 .font(.callout)
                                 .foregroundStyle(.red)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal)
+                        }
+                        }
+                        .padding(.vertical)
+                    }
+                    .onChange(of: coordinator.messages.count) {
+                        guard let last = coordinator.messages.last else { return }
+                        withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                    }
+                }
+
+                Divider()
+
+                VStack(spacing: 10) {
+                    TextField("连接到 Mac，例如 http://192.168.1.10:8000", text: $coordinator.serverAddress)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.URL)
+                        .autocorrectionDisabled()
+                        .font(.caption)
+                        .disabled(coordinator.isRunning)
+
+                    HStack(alignment: .bottom, spacing: 10) {
+                        TextField("给 Wellphone 发消息…", text: $prompt, axis: .vertical)
+                            .lineLimit(1...5)
+                            .textFieldStyle(.roundedBorder)
+                            .disabled(coordinator.isRunning)
+
+                        Button {
+                            if speech.isListening {
+                                speech.stop()
+                            } else {
+                                Task { await speech.start { prompt = $0 } }
+                            }
+                        } label: {
+                            Image(systemName: speech.isListening ? "stop.circle.fill" : "mic.fill")
+                                .font(.title2)
+                        }
+                        .tint(speech.isListening ? .red : .accentColor)
+                        .disabled(coordinator.isRunning)
+
+                        if coordinator.isRunning {
+                            Button(role: .destructive) {
+                                coordinator.cancel()
+                            } label: {
+                                Image(systemName: "stop.fill")
+                                    .font(.title2)
+                            }
+                        } else {
+                            Button {
+                                let text = prompt
+                                prompt = ""
+                                speech.stop()
+                                coordinator.start(prompt: text)
+                            } label: {
+                                Image(systemName: "arrow.up.circle.fill")
+                                    .font(.title)
+                            }
+                            .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(18)
-                    .background(.background, in: RoundedRectangle(cornerRadius: 20))
 
-                    Label(
-                        "运行后可以切换到其他 App；请勿强制关闭 Wellphone。",
-                        systemImage: "iphone.and.arrow.forward"
-                    )
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 4)
+                    if let error = speech.errorMessage {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
                 .padding()
+                .background(.bar)
             }
             .background(Color(.systemGroupedBackground))
+            .navigationTitle("Wellphone")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("新对话", systemImage: "square.and.pencil") {
+                        coordinator.newConversation()
+                    }
+                    .disabled(coordinator.isRunning)
+                }
+            }
+            .task { await coordinator.restoreSession() }
             .onDisappear { speech.stop() }
+            .alert(
+                coordinator.pendingApproval?.title ?? "确认操作",
+                isPresented: approvalPresented,
+                presenting: coordinator.pendingApproval
+            ) { approval in
+                Button("取消", role: .cancel) {
+                    coordinator.answerApproval(false)
+                }
+                Button("允许", role: approval.destructive ? .destructive : nil) {
+                    coordinator.answerApproval(true)
+                }
+            } message: { approval in
+                Text(approval.message)
+            }
+            .sheet(item: mailDraft) { draft in
+                MailComposer(draft: draft) { result in
+                    coordinator.dismissMailDraft(result: result)
+                }
+            }
+        }
+    }
+
+    private var approvalPresented: Binding<Bool> {
+        Binding(
+            get: { coordinator.pendingApproval != nil },
+            set: { if !$0 { coordinator.answerApproval(false) } }
+        )
+    }
+
+    private var mailDraft: Binding<MailDraft?> {
+        Binding(
+            get: { coordinator.mailDraft },
+            set: { if $0 == nil { coordinator.dismissMailDraft() } }
+        )
+    }
+}
+
+private struct MessageBubble: View {
+    let message: ConversationMessage
+
+    var body: some View {
+        HStack {
+            if message.role == .user { Spacer(minLength: 52) }
+            Text(message.content)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .foregroundStyle(message.role == .user ? .white : .primary)
+                .background(
+                    message.role == .user ? Color.accentColor : Color(.secondarySystemGroupedBackground),
+                    in: RoundedRectangle(cornerRadius: 18)
+                )
+            if message.role == .assistant { Spacer(minLength: 52) }
+        }
+        .padding(.horizontal)
+    }
+}
+
+private struct MailComposer: UIViewControllerRepresentable {
+    let draft: MailDraft
+    let onFinish: (String) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onFinish: onFinish)
+    }
+
+    func makeUIViewController(context: Context) -> MFMailComposeViewController {
+        let controller = MFMailComposeViewController()
+        controller.mailComposeDelegate = context.coordinator
+        controller.setToRecipients(draft.to)
+        controller.setCcRecipients(draft.cc)
+        controller.setBccRecipients(draft.bcc)
+        controller.setSubject(draft.subject)
+        controller.setMessageBody(draft.body, isHTML: false)
+        return controller
+    }
+
+    func updateUIViewController(
+        _ uiViewController: MFMailComposeViewController,
+        context: Context
+    ) {}
+
+    final class Coordinator: NSObject, MFMailComposeViewControllerDelegate {
+        let onFinish: (String) -> Void
+
+        init(onFinish: @escaping (String) -> Void) {
+            self.onFinish = onFinish
+        }
+
+        func mailComposeController(
+            _ controller: MFMailComposeViewController,
+            didFinishWith result: MFMailComposeResult,
+            error: Error?
+        ) {
+            let status = switch result {
+            case .sent: "邮件已交给 Mail 发送"
+            case .saved: "邮件草稿已保存"
+            case .failed: error?.localizedDescription ?? "邮件发送失败"
+            case .cancelled: "已取消邮件"
+            @unknown default: "邮件编辑已结束"
+            }
+            controller.dismiss(animated: true)
+            onFinish(status)
         }
     }
 }

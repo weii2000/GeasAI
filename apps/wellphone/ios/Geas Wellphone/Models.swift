@@ -1,5 +1,6 @@
 import Foundation
 import ImageIO
+import CoreGraphics
 
 enum JSONValue: Codable, Sendable, Equatable {
     case string(String)
@@ -53,6 +54,16 @@ enum JSONValue: Codable, Sendable, Equatable {
         let strings = values.compactMap(\.string)
         return strings.count == values.count ? strings : nil
     }
+
+    var bool: Bool? {
+        guard case .bool(let value) = self else { return nil }
+        return value
+    }
+
+    var number: Double? {
+        guard case .number(let value) = self else { return nil }
+        return value
+    }
 }
 
 struct ServerTask: Codable, Sendable {
@@ -64,10 +75,46 @@ struct ServerTask: Codable, Sendable {
     }
 
     let id: String
+    let sessionID: String
     let prompt: String
     let status: Status
     let answer: String?
     let error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case sessionID = "session_id"
+        case prompt
+        case status
+        case answer
+        case error
+    }
+}
+
+struct ConversationMessage: Codable, Sendable, Identifiable {
+    enum Role: String, Codable, Sendable {
+        case user
+        case assistant
+    }
+
+    let id: String
+    let role: Role
+    let content: String
+    let timestamp: String
+}
+
+struct ServerSession: Codable, Sendable {
+    let id: String
+    let createdAt: String
+    let updatedAt: String
+    let messages: [ConversationMessage]
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+        case messages
+    }
 }
 
 struct ToolCall: Codable, Sendable {
@@ -110,6 +157,13 @@ struct PhotoSummary: Sendable {
     let width: Int
     let height: Int
     let isFavorite: Bool
+    let isHidden: Bool
+    let isScreenshot: Bool
+    let mediaType: String
+    let duration: Double
+    let addedAt: String?
+    let latitude: Double?
+    let longitude: Double?
 
     var json: JSONValue {
         .object([
@@ -118,12 +172,49 @@ struct PhotoSummary: Sendable {
             "width": .number(Double(width)),
             "height": .number(Double(height)),
             "is_favorite": .bool(isFavorite),
+            "is_hidden": .bool(isHidden),
+            "is_screenshot": .bool(isScreenshot),
+            "media_type": .string(mediaType),
+            "duration": .number(duration),
+            "added_at": addedAt.map(JSONValue.string) ?? .null,
+            "latitude": latitude.map(JSONValue.number) ?? .null,
+            "longitude": longitude.map(JSONValue.number) ?? .null,
         ])
     }
 }
 
+struct AlbumSummary: Sendable {
+    let identifier: String
+    let name: String
+    let count: Int
+
+    var json: JSONValue {
+        .object([
+            "album_id": .string(identifier),
+            "name": .string(name),
+            "count": .number(Double(count)),
+        ])
+    }
+}
+
+struct MailDraft: Identifiable, Sendable {
+    let id = UUID()
+    let to: [String]
+    let cc: [String]
+    let bcc: [String]
+    let subject: String
+    let body: String
+}
+
+struct ToolApproval: Identifiable, Sendable {
+    let id = UUID()
+    let title: String
+    let message: String
+    let destructive: Bool
+}
+
 struct PhotoImage: @unchecked Sendable {
-    let data: Data
+    let image: CGImage
     let orientation: CGImagePropertyOrientation
 }
 
@@ -138,6 +229,8 @@ enum WellphoneError: LocalizedError {
     case server(String)
     case backgroundRegistrationFailed
     case backgroundStartTimedOut
+    case mailUnavailable
+    case userDeclined(String)
 
     var errorDescription: String? {
         switch self {
@@ -161,6 +254,10 @@ enum WellphoneError: LocalizedError {
             "后台任务注册失败，请检查 Bundle ID 和 Info.plist。"
         case .backgroundStartTimedOut:
             "系统未能及时启动后台任务，请稍后重试。"
+        case .mailUnavailable:
+            "这台设备尚未在 Apple Mail 中配置可发送邮件的账户。"
+        case .userDeclined(let action):
+            "用户未批准操作：\(action)"
         }
     }
 }
@@ -178,5 +275,35 @@ extension Dictionary where Key == String, Value == JSONValue {
             throw WellphoneError.invalidArguments("\(key) 必须是非空字符串数组")
         }
         return values
+    }
+
+    func optionalStrings(_ key: String) throws -> [String] {
+        guard let value = self[key] else { return [] }
+        guard let values = value.strings else {
+            throw WellphoneError.invalidArguments("\(key) 必须是字符串数组")
+        }
+        return values
+    }
+
+    func requiredBool(_ key: String) throws -> Bool {
+        guard let value = self[key]?.bool else {
+            throw WellphoneError.invalidArguments("\(key) 必须是布尔值")
+        }
+        return value
+    }
+
+    func optionalBool(_ key: String) throws -> Bool? {
+        guard let raw = self[key] else { return nil }
+        guard let value = raw.bool else {
+            throw WellphoneError.invalidArguments("\(key) 必须是布尔值")
+        }
+        return value
+    }
+
+    func requiredNumber(_ key: String) throws -> Double {
+        guard let value = self[key]?.number else {
+            throw WellphoneError.invalidArguments("\(key) 必须是数字")
+        }
+        return value
     }
 }
