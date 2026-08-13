@@ -163,6 +163,8 @@ class WellphoneService:
             record.status = "failed"
         finally:
             self.store.save(session)
+            # ponytail: retain the closed channel for idempotent HTTP retries;
+            # evict it with its TaskRecord if terminal-task TTL cleanup is added.
             await self.broker.close_task(record.id)
 
     def _build_session(
