@@ -8,6 +8,7 @@ struct ContentView: View {
     @Bindable var coordinator: JobCoordinator
     @State private var prompt = ""
     @State private var speech = SpeechInput()
+    @FocusState private var composerFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -15,68 +16,60 @@ struct ContentView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(spacing: 12) {
-                        if coordinator.messages.isEmpty {
-                            ContentUnavailableView(
-                                "开始一个任务",
-                                systemImage: "sparkles",
-                                description: Text("整理照片、修改相册，或起草一封邮件。")
-                            )
-                            .padding(.top, 60)
-                        }
-                        ForEach(coordinator.messages) { message in
-                            MessageBubble(message: message)
-                        }
-
-                        if coordinator.isRunning {
-                            HStack(spacing: 10) {
-                                ProgressView()
-                                Text(coordinator.status)
-                                    .font(.callout)
-                                    .foregroundStyle(.secondary)
-                                Spacer()
+                            if coordinator.messages.isEmpty {
+                                ContentUnavailableView(
+                                    "开始一个任务",
+                                    systemImage: "sparkles",
+                                    description: Text("整理照片、修改相册，或起草一封邮件。")
+                                )
+                                .padding(.top, 60)
                             }
-                            .padding(.horizontal)
-                        }
+                            ForEach(coordinator.messages) { message in
+                                MessageBubble(message: message)
+                            }
 
-                        if let error = coordinator.errorMessage {
-                            Text(error)
-                                .font(.callout)
-                                .foregroundStyle(.red)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal)
-                        }
+                            if coordinator.isRunning || coordinator.errorMessage != nil {
+                                TaskActivityCard(
+                                    status: coordinator.status,
+                                    activities: coordinator.activities,
+                                    error: coordinator.errorMessage
+                                )
+                            }
+
+                            Color.clear
+                                .frame(height: 1)
+                                .id("conversation-bottom")
                         }
                         .padding(.vertical)
                     }
-                    .onChange(of: coordinator.messages.count) {
-                        guard let last = coordinator.messages.last else { return }
-                        withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                    .scrollDismissesKeyboard(.interactively)
+                    .simultaneousGesture(
+                        TapGesture().onEnded { composerFocused = false }
+                    )
+                    .onChange(of: coordinator.messages.count + coordinator.activities.count) {
+                        withAnimation {
+                            proxy.scrollTo("conversation-bottom", anchor: .bottom)
+                        }
                     }
                 }
 
                 Divider()
 
-                VStack(spacing: 10) {
-                    TextField("连接到 Mac，例如 http://192.168.1.10:8000", text: $coordinator.serverAddress)
-                        .textInputAutocapitalization(.never)
-                        .keyboardType(.URL)
-                        .autocorrectionDisabled()
-                        .font(.caption)
-                        .disabled(coordinator.isRunning)
-
-                    HStack(alignment: .bottom, spacing: 10) {
+                VStack(spacing: 6) {
+                    HStack(alignment: .bottom, spacing: 8) {
                         TextField("给 Wellphone 发消息…", text: $prompt, axis: .vertical)
                             .lineLimit(1...5)
-                            .textFieldStyle(.roundedBorder)
+                            .textFieldStyle(.plain)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(
+                                Color(.secondarySystemBackground),
+                                in: RoundedRectangle(cornerRadius: 20)
+                            )
+                            .focused($composerFocused)
                             .disabled(coordinator.isRunning)
 
-                        Button {
-                            if speech.isListening {
-                                speech.stop()
-                            } else {
-                                Task { await speech.start { prompt = $0 } }
-                            }
-                        } label: {
+                        Button(action: toggleSpeech) {
                             Image(systemName: speech.isListening ? "stop.circle.fill" : "mic.fill")
                                 .font(.title2)
                         }
@@ -91,12 +84,7 @@ struct ContentView: View {
                                     .font(.title2)
                             }
                         } else {
-                            Button {
-                                let text = prompt
-                                prompt = ""
-                                speech.stop()
-                                coordinator.start(prompt: text)
-                            } label: {
+                            Button(action: sendPrompt) {
                                 Image(systemName: "arrow.up.circle.fill")
                                     .font(.title)
                             }
@@ -120,6 +108,14 @@ struct ContentView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("新对话", systemImage: "square.and.pencil") {
                         coordinator.newConversation()
+                    }
+                    .disabled(coordinator.isRunning)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        SettingsView(serverAddress: $coordinator.serverAddress)
+                    } label: {
+                        Label("设置", systemImage: "gearshape")
                     }
                     .disabled(coordinator.isRunning)
                 }
@@ -161,6 +157,54 @@ struct ContentView: View {
             set: { if $0 == nil { coordinator.dismissMailDraft() } }
         )
     }
+
+    private func toggleSpeech() {
+        if speech.isListening {
+            speech.stop()
+            return
+        }
+
+        composerFocused = false
+        let prefix = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task {
+            await speech.start { transcript in
+                prompt = prefix.isEmpty ? transcript : "\(prefix) \(transcript)"
+            }
+        }
+    }
+
+    private func sendPrompt() {
+        let text = prompt
+        prompt = ""
+        composerFocused = false
+        speech.stop()
+        coordinator.start(prompt: text)
+    }
+}
+
+private struct SettingsView: View {
+    @Binding var serverAddress: String
+    @FocusState private var addressFocused: Bool
+
+    var body: some View {
+        Form {
+            Section {
+                TextField("http://192.168.1.10:8000", text: $serverAddress)
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+                    .autocorrectionDisabled()
+                    .focused($addressFocused)
+                    .submitLabel(.done)
+                    .onSubmit { addressFocused = false }
+            } header: {
+                Text("Agent Server")
+            } footer: {
+                Text("填写 Mac 上 Wellphone Server 的局域网地址。")
+            }
+        }
+        .navigationTitle("设置")
+        .navigationBarTitleDisplayMode(.inline)
+    }
 }
 
 private struct MessageBubble: View {
@@ -169,10 +213,12 @@ private struct MessageBubble: View {
     var body: some View {
         HStack {
             if message.role == .user { Spacer(minLength: 52) }
-            Text(message.content)
+            Text(renderedContent)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 .foregroundStyle(message.role == .user ? .white : .primary)
+                .multilineTextAlignment(.leading)
+                .textSelection(.enabled)
                 .background(
                     message.role == .user ? Color.accentColor : Color(.secondarySystemGroupedBackground),
                     in: RoundedRectangle(cornerRadius: 18)
@@ -180,6 +226,83 @@ private struct MessageBubble: View {
             if message.role == .assistant { Spacer(minLength: 52) }
         }
         .padding(.horizontal)
+    }
+
+    private var renderedContent: AttributedString {
+        guard message.role == .assistant else {
+            return AttributedString(message.content)
+        }
+        return (try? AttributedString(
+            markdown: message.content,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )) ?? AttributedString(message.content)
+    }
+}
+
+private struct TaskActivityCard: View {
+    let status: String
+    let activities: [TaskActivity]
+    let error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                if error == nil {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .foregroundStyle(.red)
+                }
+                Text(error == nil ? status : "出现问题")
+                    .font(.subheadline.weight(.medium))
+            }
+
+            ForEach(activities) { activity in
+                HStack(alignment: .top, spacing: 8) {
+                    activityIcon(activity.state)
+                        .frame(width: 16)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(activity.title)
+                            .font(.callout)
+                        if let detail = activity.detail {
+                            Text(detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+
+            if let error {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(
+            Color(.secondarySystemGroupedBackground),
+            in: RoundedRectangle(cornerRadius: 16)
+        )
+        .padding(.horizontal)
+    }
+
+    @ViewBuilder
+    private func activityIcon(_ state: TaskActivity.State) -> some View {
+        switch state {
+        case .running:
+            ProgressView()
+                .controlSize(.mini)
+        case .completed:
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+        case .failed:
+            Image(systemName: "xmark.circle.fill")
+                .foregroundStyle(.red)
+        }
     }
 }
 
@@ -279,7 +402,7 @@ final class SpeechInput {
             recognitionTask = recognizer.recognitionTask(with: request) {
                 [weak self] result, error in
                 Task { @MainActor in
-                    guard let self else { return }
+                    guard let self, self.recognitionRequest === request else { return }
                     if let result {
                         onTranscript(result.bestTranscription.formattedString)
                     }

@@ -103,6 +103,19 @@ struct ConversationMessage: Codable, Sendable, Identifiable {
     let timestamp: String
 }
 
+struct TaskActivity: Identifiable, Sendable {
+    enum State: Sendable, Equatable {
+        case running
+        case completed
+        case failed
+    }
+
+    let id: String
+    var title: String
+    var detail: String? = nil
+    var state: State
+}
+
 struct ServerSession: Codable, Sendable {
     let id: String
     let createdAt: String

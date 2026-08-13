@@ -7,12 +7,17 @@ import Observation
 final class JobCoordinator {
     var serverAddress = UserDefaults.standard.string(
         forKey: "wellphone.serverAddress"
-    ) ?? "http://192.168.1.10:8000"
+    ) ?? "http://192.168.1.10:8000" {
+        didSet {
+            UserDefaults.standard.set(serverAddress, forKey: "wellphone.serverAddress")
+        }
+    }
     private(set) var isRunning = false
     private(set) var status = "尚未开始"
     private(set) var answer = ""
     private(set) var errorMessage: String?
     private(set) var messages: [ConversationMessage] = []
+    private(set) var activities: [TaskActivity] = []
     private(set) var sessionID = UserDefaults.standard.string(
         forKey: "wellphone.sessionID"
     )
@@ -53,6 +58,7 @@ final class JobCoordinator {
         guard !isRunning else { return }
         sessionID = nil
         messages = []
+        activities = []
         answer = ""
         errorMessage = nil
         status = "新对话"
@@ -61,6 +67,8 @@ final class JobCoordinator {
 
     func start(prompt: String) {
         guard !isRunning else { return }
+        errorMessage = nil
+        activities = []
         let cleanPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanPrompt.isEmpty else {
             errorMessage = "请输入任务。"
@@ -71,7 +79,6 @@ final class JobCoordinator {
             return
         }
 
-        UserDefaults.standard.set(serverAddress, forKey: "wellphone.serverAddress")
         messages.append(
             ConversationMessage(
                 id: UUID().uuidString,
@@ -83,24 +90,30 @@ final class JobCoordinator {
         isRunning = true
         status = "正在准备…"
         answer = ""
-        errorMessage = nil
+        activities = [
+            TaskActivity(
+                id: "planning",
+                title: "Agent 规划任务",
+                state: .running
+            )
+        ]
         completedSteps = 0
         executor.resetScope()
 
         runTask = Task {
             do {
-                try await submitBackgroundTask()
-                try Task.checkCancellation()
                 let client = try APIClient(baseURL: url, deviceID: deviceID)
                 self.client = client
                 try await run(prompt: cleanPrompt, client: client)
             } catch is CancellationError {
                 status = "任务已取消"
+                finishRunningActivity(as: .failed, detail: "已取消")
                 await cancelOnServerIfNeeded()
                 finish(success: false)
             } catch {
                 status = "任务失败"
                 errorMessage = error.localizedDescription
+                finishRunningActivity(as: .failed)
                 await syncSessionIfPossible()
                 await cancelOnServerIfNeeded()
                 finish(success: false)
@@ -149,14 +162,14 @@ final class JobCoordinator {
         sessionID = created.sessionID
         UserDefaults.standard.set(created.sessionID, forKey: "wellphone.sessionID")
         try Task.checkCancellation()
-        status = "Agent 正在规划…你可以切换到其他 App"
-        advanceProgress(title: "Wellphone 正在处理")
+        status = "Agent 正在规划…"
 
         while !Task.isCancelled {
             let current = try await client.task(id: created.id)
             switch current.status {
             case .completed:
                 answer = current.answer ?? "任务已完成。"
+                finishRunningActivity(as: .completed)
                 await syncSessionIfPossible()
                 status = mailDraft == nil ? "已完成" : "邮件草稿已准备，请确认发送"
                 finish(success: true)
@@ -172,10 +185,23 @@ final class JobCoordinator {
                 advanceProgress(title: "Agent 正在规划…", amount: 1)
                 continue
             }
-            status = "正在执行：\(displayName(for: call.name))"
+            finishRunningActivity(as: .completed)
+            let toolName = displayName(for: call.name)
+            updateActivity(id: call.callID, title: toolName, state: .running)
+            if call.name != "compose_email", backgroundTask == nil {
+                status = "正在启动后台任务…"
+                try await submitBackgroundTask()
+            }
+            status = "正在执行：\(toolName)"
             let result = await executor.execute(
                 call,
                 onProgress: { detail in
+                    self.updateActivity(
+                        id: call.callID,
+                        title: toolName,
+                        detail: detail,
+                        state: .running
+                    )
                     self.advanceProgress(title: detail, amount: 1)
                 },
                 approve: { approval in
@@ -187,7 +213,14 @@ final class JobCoordinator {
             )
             try Task.checkCancellation()
             try await client.submit(taskID: created.id, result: result)
-            advanceProgress(title: "已完成：\(displayName(for: call.name))")
+            updateActivity(
+                id: call.callID,
+                title: toolName,
+                detail: result.isError ? "执行失败，Agent 正在处理" : nil,
+                state: result.isError ? .failed : .completed
+            )
+            advanceProgress(title: "已完成：\(toolName)")
+            status = "Agent 正在规划下一步…"
         }
         throw CancellationError()
     }
@@ -288,6 +321,36 @@ final class JobCoordinator {
         backgroundTask?.updateTitle("Wellphone 正在处理", subtitle: title)
     }
 
+    private func updateActivity(
+        id: String,
+        title: String,
+        detail: String? = nil,
+        state: TaskActivity.State
+    ) {
+        if let index = activities.firstIndex(where: { $0.id == id }) {
+            activities[index].title = title
+            activities[index].detail = detail
+            activities[index].state = state
+        } else {
+            activities.append(
+                TaskActivity(id: id, title: title, detail: detail, state: state)
+            )
+        }
+    }
+
+    private func finishRunningActivity(
+        as state: TaskActivity.State,
+        detail: String? = nil
+    ) {
+        guard let index = activities.lastIndex(where: { $0.state == .running }) else {
+            return
+        }
+        activities[index].state = state
+        if let detail {
+            activities[index].detail = detail
+        }
+    }
+
     private func finish(success: Bool) {
         guard isRunning else { return }
         resolveApproval(false)
@@ -303,8 +366,6 @@ final class JobCoordinator {
             }
             task.setTaskCompleted(success: success)
             backgroundTask = nil
-        } else {
-            scheduler.cancel(taskRequestWithIdentifier: backgroundIdentifier)
         }
     }
 
