@@ -5,11 +5,16 @@ import MessageUI
 final class ToolExecutor {
     private let photos = PhotoService()
     private let ocr = OCRService()
+    private let location = LocationService()
+    private let health = HealthService()
+    private let workouts = WorkoutService()
+    private let contacts = ContactService()
     private var allowedPhotoIDs: Set<String> = []
     private var writableAlbumIDs: Set<String> = []
     private var initialSearchRange: (start: Date, end: Date)?
     private var albumName: String?
     private var scopeLocked = false
+    private var allowedWorkoutIDs: Set<String> = []
 
     func resetScope() {
         allowedPhotoIDs.removeAll()
@@ -17,6 +22,14 @@ final class ToolExecutor {
         initialSearchRange = nil
         albumName = nil
         scopeLocked = false
+        allowedWorkoutIDs.removeAll()
+    }
+
+    func prepareMail(_ draft: MailDraft) async throws -> MailPresentation {
+        let attachments = try await photos.mailAttachments(
+            identifiers: draft.attachmentPhotoIDs
+        )
+        return MailPresentation(draft: draft, attachments: attachments)
     }
 
     func execute(
@@ -59,6 +72,130 @@ final class ToolExecutor {
         onPendingAction: (PendingAction) -> Void
     ) async throws -> [String: JSONValue] {
         switch name {
+        case .getCurrentLocation:
+            return try await location.currentLocation()
+
+        case .geocodeAddress:
+            let results = try await location.geocode(
+                address: arguments.requiredString("address"),
+                limit: arguments.requiredInteger("max_results")
+            )
+            return ["count": .number(Double(results.count)), "results": .array(results)]
+
+        case .reverseGeocodeLocation:
+            let results = try await location.reverseGeocode(
+                latitude: arguments.requiredNumber("latitude"),
+                longitude: arguments.requiredNumber("longitude")
+            )
+            return ["count": .number(Double(results.count)), "results": .array(results)]
+
+        case .searchNearbyPlaces:
+            let results = try await location.nearby(
+                query: arguments.requiredString("query"),
+                radius: arguments.requiredNumber("radius_meters"),
+                limit: arguments.requiredInteger("max_results")
+            )
+            return ["count": .number(Double(results.count)), "places": .array(results)]
+
+        case .getHealthSummary:
+            let range = try validatedRange(arguments, maximumDays: 31)
+            return try await health.activitySummary(start: range.start, end: range.end)
+
+        case .getSleepSummary:
+            let range = try validatedRange(arguments, maximumDays: 31)
+            return try await health.sleepSummary(start: range.start, end: range.end)
+
+        case .listHealthWorkouts:
+            let range = try validatedRange(arguments, maximumDays: 90)
+            let limit = try arguments.requiredInteger("limit")
+            guard (1...50).contains(limit) else {
+                throw WellphoneError.invalidArguments("limit 必须在 1 到 50 之间")
+            }
+            let results = try await health.workouts(
+                start: range.start,
+                end: range.end,
+                limit: limit
+            )
+            return ["count": .number(Double(results.count)), "workouts": .array(results)]
+
+        case .listScheduledWorkouts:
+            let results = try await workouts.scheduledWorkouts()
+            allowedWorkoutIDs.formUnion(results.compactMap {
+                $0.object?["workout_id"]?.string
+            })
+            return ["count": .number(Double(results.count)), "workouts": .array(results)]
+
+        case .scheduleWorkout:
+            let activity = try arguments.requiredString("activity")
+            let workoutLocation = try arguments.requiredString("location")
+            let goalType = try arguments.requiredString("goal_type")
+            let goalValue = try arguments.optionalNumber("goal_value")
+            guard ["walking", "running", "cycling", "swimming"].contains(activity),
+                  ["indoor", "outdoor", "unknown"].contains(workoutLocation),
+                  ["open", "time_minutes", "distance_km", "energy_kcal"].contains(goalType),
+                  goalType == "open" || (goalValue ?? 0) > 0 else {
+                throw WellphoneError.invalidArguments("训练类型、地点或目标无效")
+            }
+            let scheduledAt = try parseDate(arguments.requiredString("scheduled_at"))
+            guard scheduledAt > .now,
+                  scheduledAt <= Calendar.current.date(
+                    byAdding: .year,
+                    value: 1,
+                    to: .now
+                  )! else {
+                throw WellphoneError.invalidArguments("训练时间必须在未来一年内")
+            }
+            try await requireApproval(
+                ToolApproval(
+                    title: "安排训练？",
+                    message: "将训练计划添加到 Apple Watch。",
+                    destructive: false
+                ),
+                approve
+            )
+            let result = try await workouts.schedule(
+                actionID: actionID,
+                activityName: activity,
+                locationName: workoutLocation,
+                goalType: goalType,
+                goalValue: goalValue,
+                date: scheduledAt
+            )
+            allowedWorkoutIDs.insert(result.id)
+            return [
+                "workout_id": .string(result.id),
+                "scheduled": .bool(true),
+                "already_scheduled": .bool(result.alreadyScheduled),
+            ]
+
+        case .removeScheduledWorkout:
+            let workoutID = try arguments.requiredString("workout_id").lowercased()
+            guard allowedWorkoutIDs.contains(workoutID), let id = UUID(uuidString: workoutID) else {
+                throw WellphoneError.toolScopeViolation(
+                    "训练必须先由本次 list_scheduled_workouts 返回"
+                )
+            }
+            try await requireApproval(
+                ToolApproval(
+                    title: "移除训练计划？",
+                    message: "将从 Apple Watch 训练计划中移除此项。",
+                    destructive: true
+                ),
+                approve
+            )
+            let removed = try await workouts.remove(id: id)
+            return [
+                "removed": .bool(removed),
+                "already_absent": .bool(!removed),
+            ]
+
+        case .searchContacts:
+            let results = try contacts.search(
+                query: arguments.requiredString("query"),
+                limit: arguments.requiredInteger("limit")
+            )
+            return ["count": .number(Double(results.count)), "contacts": .array(results)]
+
         case .searchPhotos:
             let start = try parseDate(arguments.requiredString("start"))
             let end = try parseDate(arguments.requiredString("end"))
@@ -337,13 +474,28 @@ final class ToolExecutor {
             guard MFMailComposeViewController.canSendMail() else {
                 throw WellphoneError.mailUnavailable
             }
+            let attachmentIDs = try arguments.optionalStrings("attachment_photo_ids")
+            guard attachmentIDs.count <= 3 else {
+                throw WellphoneError.attachmentLimit
+            }
+            if !attachmentIDs.isEmpty {
+                try requireAllowed(attachmentIDs)
+                try await photos.requireFullAccess()
+            }
+            let subject = try arguments.requiredString("subject")
+            let body = try arguments.requiredString("body")
+            guard subject.count <= 500, body.count <= 100_000 else {
+                throw WellphoneError.invalidArguments("邮件主题或正文过长")
+            }
             let draft = MailDraft(
                 id: actionID,
                 to: try recipients(arguments.requiredStrings("to")),
                 cc: try recipients(arguments.optionalStrings("cc")),
                 bcc: try recipients(arguments.optionalStrings("bcc")),
-                subject: try arguments.requiredString("subject"),
-                body: try arguments.requiredString("body")
+                subject: subject,
+                body: body,
+                isHTML: try arguments.optionalBool("is_html") ?? false,
+                attachmentPhotoIDs: attachmentIDs
             )
             onPendingAction(
                 PendingAction(
@@ -360,6 +512,7 @@ final class ToolExecutor {
                 "prepared": .bool(true),
                 "requires_user_send": .bool(true),
                 "recipient_count": .number(Double(draft.to.count + draft.cc.count + draft.bcc.count)),
+                "attachment_count": .number(Double(attachmentIDs.count)),
             ]
 
         case .openYouTubeVideo:
@@ -486,7 +639,7 @@ final class ToolExecutor {
     }
 
     private func recipients(_ values: [String]) throws -> [String] {
-        guard values.allSatisfy({
+        guard values.count <= 50, values.allSatisfy({
             $0.contains("@") && !$0.contains("\n") && !$0.contains("\r")
         }) else {
             throw WellphoneError.invalidArguments("邮件地址格式无效")
@@ -509,6 +662,21 @@ final class ToolExecutor {
             throw WellphoneError.invalidArguments("日期必须是带时区的 ISO 8601")
         }
         return date
+    }
+
+    private func validatedRange(
+        _ arguments: [String: JSONValue],
+        maximumDays: Double
+    ) throws -> (start: Date, end: Date) {
+        let start = try parseDate(arguments.requiredString("start"))
+        let end = try parseDate(arguments.requiredString("end"))
+        guard start < end else {
+            throw WellphoneError.invalidArguments("start 必须早于 end")
+        }
+        guard end.timeIntervalSince(start) <= maximumDays * 86_400 else {
+            throw WellphoneError.invalidArguments("日期范围不能超过 \(Int(maximumDays)) 天")
+        }
+        return (start, end)
     }
 
     private func mapsURL(path: String, items: [URLQueryItem]) throws -> URL {

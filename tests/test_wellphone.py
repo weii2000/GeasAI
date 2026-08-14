@@ -8,11 +8,16 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from jsonschema import Draft202012Validator
 
 import apps.wellphone.main
-from apps.wellphone.agent import _youtube_result, create_phone_agent
+from apps.wellphone.agent import TOOL_SPECS, _youtube_result, create_phone_agent
 from apps.wellphone.broker import ToolBroker
-from apps.wellphone.config import WellphoneConfig, _load_mcp_servers
+from apps.wellphone.config import (
+    WellphoneConfig,
+    _load_mcp_servers,
+    _load_mcp_tool_allowlists,
+)
 from apps.wellphone.protocol import ToolResultEnvelope
 from apps.wellphone.server import create_app
 from apps.wellphone.service import WellphoneService
@@ -54,10 +59,21 @@ def test_wellphone_mcp_config_validates_url_and_token(monkeypatch) -> None:
         "https://notes.example/mcp",
     )
     monkeypatch.setenv("WELLPHONE_MCP_NOTES_TOKEN", "secret")
+    monkeypatch.setenv("WELLPHONE_MCP_NOTES_TOOLS", "search_notes, read_note")
 
     servers = _load_mcp_servers()
     assert servers["notes"].url == "https://notes.example/mcp"
     assert servers["notes"].token == "secret"
+    assert _load_mcp_tool_allowlists(servers) == {
+        "notes": frozenset({"search_notes", "read_note"})
+    }
+
+    monkeypatch.setenv("WELLPHONE_MCP_NOTES_TOOLS", "*")
+    assert _load_mcp_tool_allowlists(servers) == {"notes": None}
+
+    monkeypatch.delenv("WELLPHONE_MCP_NOTES_TOOLS")
+    with pytest.raises(ValueError, match="WELLPHONE_MCP_NOTES_TOOLS"):
+        _load_mcp_tool_allowlists(servers)
 
     monkeypatch.setenv("WELLPHONE_MCP_BROKEN_URL", "ftp://example/mcp")
     with pytest.raises(ValueError, match="WELLPHONE_MCP_BROKEN_URL"):
@@ -78,6 +94,7 @@ def test_wellphone_server_lifecycle_owns_mcp_registry(monkeypatch) -> None:
         port=8000,
         tool_timeout=1,
         mcp_servers=mcp_servers,
+        mcp_tool_allowlists={"notes": frozenset({"search"})},
     )
 
     class FakeModels:
@@ -97,7 +114,8 @@ def test_wellphone_server_lifecycle_owns_mcp_registry(monkeypatch) -> None:
         async def __aexit__(self, *_args: object) -> None:
             events.append("registry_exit")
 
-    async def discover(_registry: object) -> list[str]:
+    async def discover(_registry: object, **options: object) -> list[str]:
+        assert options["allowed_tools_by_server"] == config.mcp_tool_allowlists
         events.append("discover")
         return ["mcp-tool"]
 
@@ -144,7 +162,7 @@ def test_wellphone_server_lifecycle_owns_mcp_registry(monkeypatch) -> None:
         "registry_exit",
     ]
 
-    async def fail_discovery(_registry: object) -> list[str]:
+    async def fail_discovery(_registry: object, **_options: object) -> list[str]:
         raise RuntimeError("invalid MCP schema")
 
     events.clear()
@@ -263,6 +281,29 @@ def test_phone_agent_rejects_duplicate_tool_name() -> None:
             ScriptedModel([]),
             [duplicate],
         )
+
+
+def test_wellphone_native_tool_contracts_are_unique_and_bounded() -> None:
+    specs = {name: schema for name, _description, schema in TOOL_SPECS}
+    assert len(specs) == len(TOOL_SPECS)
+    for schema in specs.values():
+        Draft202012Validator.check_schema(schema)
+    assert {
+        "get_current_location",
+        "search_nearby_places",
+        "get_health_summary",
+        "get_sleep_summary",
+        "list_health_workouts",
+        "list_scheduled_workouts",
+        "schedule_workout",
+        "remove_scheduled_workout",
+        "search_contacts",
+    } <= specs.keys()
+    compose = specs["compose_email"]["properties"]
+    assert compose["attachment_photo_ids"]["maxItems"] == 3
+    assert specs["search_nearby_places"]["properties"]["max_results"][
+        "maximum"
+    ] == 10
 
 
 def test_broker_redelivers_call_and_accepts_duplicate_result() -> None:

@@ -21,6 +21,7 @@ class WellphoneConfig:
     port: int
     tool_timeout: float
     mcp_servers: dict[str, MCPServerConfig]
+    mcp_tool_allowlists: dict[str, frozenset[str] | None]
 
 
 def load_config() -> WellphoneConfig:
@@ -50,6 +51,7 @@ def load_config() -> WellphoneConfig:
     if not 1 <= port <= 65_535:
         raise ValueError("WELLPHONE_PORT must be between 1 and 65535")
 
+    mcp_servers = _load_mcp_servers()
     return WellphoneConfig(
         provider=provider,
         model=model,
@@ -58,7 +60,8 @@ def load_config() -> WellphoneConfig:
         host=host,
         port=port,
         tool_timeout=tool_timeout,
-        mcp_servers=_load_mcp_servers(),
+        mcp_servers=mcp_servers,
+        mcp_tool_allowlists=_load_mcp_tool_allowlists(mcp_servers),
     )
 
 
@@ -87,6 +90,28 @@ def _load_mcp_servers() -> dict[str, MCPServerConfig]:
         servers[name] = MCPServerConfig(url=url, token=token or None)
 
     return servers
+
+
+def _load_mcp_tool_allowlists(
+    servers: dict[str, MCPServerConfig],
+) -> dict[str, frozenset[str] | None]:
+    allowlists: dict[str, frozenset[str] | None] = {}
+    for server in servers:
+        variable = f"WELLPHONE_MCP_{server.upper()}_TOOLS"
+        raw = os.getenv(variable)
+        if raw is None:
+            raise ValueError(f"{variable} is required for configured MCP servers")
+        value = raw.strip()
+        if value == "*":
+            allowlists[server] = None
+            continue
+        tools = frozenset(item.strip() for item in value.split(",") if item.strip())
+        if not tools or "*" in tools:
+            raise ValueError(
+                f"{variable} must be a comma-separated tool list or exactly *"
+            )
+        allowlists[server] = tools
+    return allowlists
 
 
 def _integer(name: str, default: int) -> int:

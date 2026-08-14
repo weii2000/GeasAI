@@ -332,6 +332,21 @@ def test_mcp_tool_adapter_rejects_invalid_remote_contracts() -> None:
         assert len(first[0].name) <= 64
         assert re.fullmatch(r"[A-Za-z0-9_-]+", first[0].name)
 
+        registry.tools = [
+            Tool(name="read", input_schema={"type": "object"}),
+            Tool(name="delete", input_schema={"type": "object"}),
+        ]
+        allowed = await create_mcp_tools(
+            registry,  # type: ignore[arg-type]
+            allowed_tools_by_server={"one": {"read"}},
+        )
+        assert [tool.name for tool in allowed] == ["mcp__one__read"]
+        with pytest.raises(ValueError, match="missing allowed tools"):
+            await create_mcp_tools(
+                registry,  # type: ignore[arg-type]
+                allowed_tools_by_server={"one": {"missing"}},
+            )
+
         registry.result = CallToolResult(
             content=[
                 ImageContent(data="AA==", mime_type="image/png")

@@ -2,7 +2,7 @@ import MessageUI
 import SwiftUI
 
 struct MailComposer: UIViewControllerRepresentable {
-    let draft: MailDraft
+    let presentation: MailPresentation
     let onFinish: (String) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -10,13 +10,21 @@ struct MailComposer: UIViewControllerRepresentable {
     }
 
     func makeUIViewController(context: Context) -> MFMailComposeViewController {
+        let draft = presentation.draft
         let controller = MFMailComposeViewController()
         controller.mailComposeDelegate = context.coordinator
         controller.setToRecipients(draft.to)
         controller.setCcRecipients(draft.cc)
         controller.setBccRecipients(draft.bcc)
         controller.setSubject(draft.subject)
-        controller.setMessageBody(draft.body, isHTML: false)
+        controller.setMessageBody(draft.body, isHTML: draft.isHTML)
+        for attachment in presentation.attachments {
+            controller.addAttachmentData(
+                attachment.data,
+                mimeType: attachment.mimeType,
+                fileName: attachment.filename
+            )
+        }
         return controller
     }
 

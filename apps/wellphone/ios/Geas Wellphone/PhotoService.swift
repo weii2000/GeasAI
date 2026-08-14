@@ -153,6 +153,45 @@ final class PhotoService {
         }
     }
 
+    func mailAttachments(identifiers: [String]) async throws -> [MailAttachment] {
+        guard identifiers.count <= 3 else {
+            throw WellphoneError.attachmentLimit
+        }
+        let fetched = fetchAssets(identifiers)
+        if let missing = fetched.missing.first {
+            throw WellphoneError.missingPhoto(missing)
+        }
+        guard fetched.assets.allSatisfy({ $0.mediaType == .image }) else {
+            throw WellphoneError.invalidArguments("邮件附件目前只支持照片")
+        }
+        var totalBytes = 0
+        var attachments: [MailAttachment] = []
+        for (index, identifier) in identifiers.enumerated() {
+            try Task.checkCancellation()
+            let photo = try await image(identifier: identifier)
+            let image = UIImage(
+                cgImage: photo.image,
+                scale: 1,
+                orientation: photo.orientation.uiOrientation
+            )
+            guard let data = image.jpegData(compressionQuality: 0.85) else {
+                throw WellphoneError.missingPhoto(identifier)
+            }
+            totalBytes += data.count
+            guard totalBytes <= 15 * 1_024 * 1_024 else {
+                throw WellphoneError.attachmentLimit
+            }
+            attachments.append(
+                MailAttachment(
+                    data: data,
+                    mimeType: "image/jpeg",
+                    filename: "wellphone-photo-\(index + 1).jpg"
+                )
+            )
+        }
+        return attachments
+    }
+
     func findOrCreateAlbum(named name: String) async throws -> String {
         if let album = findAlbum(named: name) {
             return album.localIdentifier
@@ -468,6 +507,21 @@ private extension UIImage.Orientation {
         case .right: .right
         case .rightMirrored: .rightMirrored
         @unknown default: .up
+        }
+    }
+}
+
+private extension CGImagePropertyOrientation {
+    var uiOrientation: UIImage.Orientation {
+        switch self {
+        case .up: .up
+        case .upMirrored: .upMirrored
+        case .down: .down
+        case .downMirrored: .downMirrored
+        case .left: .left
+        case .leftMirrored: .leftMirrored
+        case .right: .right
+        case .rightMirrored: .rightMirrored
         }
     }
 }

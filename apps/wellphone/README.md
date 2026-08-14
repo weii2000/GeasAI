@@ -3,9 +3,10 @@
 Wellphone 是建立在 Geas Runtime 上的 iOS Capability Agent。它不模拟点击或接管
 屏幕，而是让 Agent 调用 iOS 原生能力，在用户继续使用手机时处理后台数据任务。
 
-当前实现覆盖照片管理、邮件起草和受控的外部服务跳转：模型负责理解意图和规划
-步骤，Mac 调用 YouTube Data API 搜索公开视频；iPhone 通过 PhotoKit、Vision 和
-MessageUI 执行本地能力；需要切换 App 的结果会保存为待处理动作，并在任务完成后通知用户。
+当前实现覆盖照片管理、位置、健康与训练、联系人、邮件起草和受控的外部服务跳转。
+模型负责理解意图和规划步骤；Mac 执行 Server Tool 与 MCP Tool；iPhone 通过 Apple
+原生 Framework 执行私有设备能力。需要切换 App 的结果会保存为待处理动作，并在任务
+完成后通知用户。
 
 ## 架构
 
@@ -33,7 +34,7 @@ sequenceDiagram
     participant A as Geas Agent
     participant L as LLM
     participant T as iOS Tool Executor
-    participant K as PhotoKit / Vision
+    participant K as Native iOS Frameworks
 
     U->>I: 发送一条消息
     I->>S: device_id + session_id + run UUID
@@ -51,6 +52,19 @@ sequenceDiagram
     A->>L: 根据结果继续决策
     L-->>I: 最终回答
 ~~~
+
+## 能力矩阵
+
+| 领域 | 原生能力 | Framework | 写入边界 |
+| --- | --- | --- | --- |
+| 照片 | 日期/属性搜索、OCR、相册与属性管理、删除 | PhotoKit / Vision | 任务级 ID Scope；高风险操作再次确认 |
+| 位置 | 单次定位、正反向地址解析、附近地点搜索 | CoreLocation / MapKit | 不持续跟踪，不后台采集轨迹 |
+| 健康 | 活动汇总、睡眠汇总、运动历史 | HealthKit | 只读；先在设备端聚合 |
+| 训练 | 查看、创建、移除简单训练计划 | WorkoutKit | 写操作确认；使用稳定 ID 防止重复创建 |
+| 联系人 | 按姓名查找邮箱 | Contacts | 只读取姓名与邮箱 |
+| 邮件 | 收件人、抄送、HTML、照片附件草稿 | MessageUI | 用户在系统 Mail 中最终发送 |
+| 外部服务 | YouTube 搜索、地图与视频跳转 | Server API / Universal Link | 结果进入 Pending Action，用户决定何时打开 |
+| MCP | 启动时发现并挂载远端工具 | Streamable HTTP MCP | 每个 Server 必须配置 Tool allowlist |
 
 ## 模块边界
 
@@ -72,6 +86,9 @@ sequenceDiagram
 | JobCoordinator.swift | 前后台任务协调、进度与取消 |
 | ToolExecutor.swift | 工具路由、参数校验、任务级权限边界与待处理动作构造 |
 | PhotoService.swift | PhotoKit 查询、相册和照片属性修改与 Vision OCR |
+| LocationService.swift | 单次定位、MapKit 地址解析与附近地点搜索 |
+| HealthService.swift / WorkoutService.swift | HealthKit 只读聚合与 WorkoutKit 计划管理 |
+| ContactService.swift / PermissionCenter.swift | 联系人邮箱查询与前台权限入口 |
 | ContentView.swift | 对话界面、待处理动作、操作审批和系统 Mail Composer |
 
 ## 数据与安全边界
@@ -84,8 +101,10 @@ sequenceDiagram
 - 工具只能操作本次搜索返回的照片和本次任务创建或解析的相册；
 - 删除、隐藏、改日期/位置和移出相册等高风险操作必须在手机端再次确认；
 - 邮件工具只填充系统 Mail Composer，最终发送权始终属于用户；
+- 健康数据只读且先在手机聚合；位置仅在明确任务中单次读取；
 - YouTube API Key 只保存在 Mac；Google Maps 与 YouTube 跳转只允许固定 HTTPS 域名；
-- 配置的 MCP Server 是工具级信任边界，其全部工具都会暴露给 Agent；当前只应接入可信、优先只读的 Server；
+- 每个 MCP Server 必须显式配置允许挂载的原始 Tool 名；未知 Tool 会让 Server 启动失败；
+- 邮件 MCP 只允许搜索和读取；回复统一进入原生 Mail 草稿；
 - 邮件与外部 App 动作只在用户点击通知或卡片后打开，Agent 不能静默切换前台应用；
 - 客户端生成任务 UUID，Tool Call 在结果确认前可重复获取，降低断网造成的重复执行；
 - 每台设备生成独立 ID 并只能访问所属 Session；该 ID 用于原型隔离，不等同于公网认证；
@@ -99,4 +118,7 @@ sequenceDiagram
 - HTTP 通道没有认证，只适用于可信局域网原型；
 - App Intents 尚未接入，当前入口仍是 Wellphone App；
 - MCP Tool Catalog 在 Server 启动时固定，远端工具变化后需要重启刷新；
+- HealthKit 无法向 App 区分“无数据”和“用户拒绝读取”；回答必须保留这一隐私语义；
+- WorkoutKit 计划需要受支持且已配对 Apple Watch；没有手表时会返回能力不可用；
+- 原生 Mail 不提供收件箱读取 API，搜索和读取邮件依赖配置的只读 MCP Server；
 - 照片是否语义匹配最终仍依赖模型判断。

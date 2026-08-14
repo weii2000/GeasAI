@@ -167,8 +167,8 @@ struct ContentView: View {
             } message: { approval in
                 Text(approval.message)
             }
-            .sheet(item: mailDraft) { draft in
-                MailComposer(draft: draft) { result in
+            .sheet(item: mailDraft) { presentation in
+                MailComposer(presentation: presentation) { result in
                     coordinator.dismissMailDraft(result: result)
                 }
             }
@@ -182,7 +182,7 @@ struct ContentView: View {
         )
     }
 
-    private var mailDraft: Binding<MailDraft?> {
+    private var mailDraft: Binding<MailPresentation?> {
         Binding(
             get: { coordinator.mailDraft },
             set: { if $0 == nil { coordinator.dismissMailDraft() } }

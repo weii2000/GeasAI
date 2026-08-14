@@ -44,7 +44,10 @@ async def _run_server(
         )
 
     async with MCPRegistry(config.mcp_servers) as registry:
-        extra_tools = await create_mcp_tools(registry)
+        extra_tools = await create_mcp_tools(
+            registry,
+            allowed_tools_by_server=config.mcp_tool_allowlists,
+        )
         service = WellphoneService(
             model,
             models.stream,

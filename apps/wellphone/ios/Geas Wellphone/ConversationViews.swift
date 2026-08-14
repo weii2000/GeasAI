@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct PendingActionCard: View {
     let action: PendingAction
@@ -41,6 +42,7 @@ struct PendingActionCard: View {
 struct SettingsView: View {
     @Binding var serverAddress: String
     @FocusState private var addressFocused: Bool
+    @State private var permissions = PermissionCenter()
 
     var body: some View {
         Form {
@@ -57,9 +59,65 @@ struct SettingsView: View {
             } footer: {
                 Text("填写 Mac 上 Wellphone Server 的局域网地址。")
             }
+
+            Section {
+                PermissionRow(name: "照片", status: permissions.photoStatus) {
+                    Task { await permissions.requestPhotos() }
+                }
+                PermissionRow(name: "位置", status: permissions.locationStatus) {
+                    permissions.requestLocation()
+                }
+                PermissionRow(name: "健康", status: permissions.healthStatus) {
+                    Task { await permissions.requestHealth() }
+                }
+                PermissionRow(name: "联系人", status: permissions.contactStatus) {
+                    Task { await permissions.requestContacts() }
+                }
+                PermissionRow(name: "训练计划", status: permissions.workoutStatus) {
+                    Task { await permissions.requestWorkout() }
+                }
+                Button("打开系统设置", systemImage: "gear") {
+                    guard let url = URL(string: UIApplication.openSettingsURLString) else {
+                        return
+                    }
+                    UIApplication.shared.open(url)
+                }
+            } header: {
+                Text("设备权限")
+            } footer: {
+                Text("权限只会在你点击授权时请求；拒绝后可在系统设置中修改。")
+            }
+
+            if let error = permissions.errorMessage {
+                Section {
+                    Text(error).foregroundStyle(.red)
+                }
+            }
         }
         .navigationTitle("设置")
         .navigationBarTitleDisplayMode(.inline)
+        .task { await permissions.refresh() }
+    }
+}
+
+private struct PermissionRow: View {
+    let name: String
+    let status: String
+    let request: () -> Void
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name)
+                Text(status)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("授权", action: request)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
     }
 }
 

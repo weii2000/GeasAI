@@ -24,7 +24,7 @@ final class JobCoordinator {
         forKey: "wellphone.sessionID"
     )
     private(set) var pendingApproval: ToolApproval?
-    private(set) var mailDraft: MailDraft?
+    private(set) var mailDraft: MailPresentation?
     private(set) var pendingActions: [PendingAction] = {
         guard let data = UserDefaults.standard.data(forKey: "wellphone.pendingActions") else {
             return []
@@ -280,8 +280,12 @@ final class JobCoordinator {
         switch action.kind {
         case .mail:
             guard let draft = action.mailDraft else { return }
-            mailDraft = draft
-            removePendingAction(id: id)
+            do {
+                mailDraft = try await executor.prepareMail(draft)
+                removePendingAction(id: id)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         case .url:
             guard let url = action.url,
                   url.scheme == "https",

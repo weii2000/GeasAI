@@ -64,6 +64,11 @@ enum JSONValue: Codable, Sendable, Equatable {
         guard case .number(let value) = self else { return nil }
         return value
     }
+
+    var object: [String: JSONValue]? {
+        guard case .object(let value) = self else { return nil }
+        return value
+    }
 }
 
 struct ServerTask: Codable, Sendable {
@@ -153,11 +158,27 @@ enum ToolName: String, Sendable {
     case openYouTubeVideo = "open_youtube_video"
     case openGoogleMapsSearch = "open_google_maps_search"
     case openGoogleMapsDirections = "open_google_maps_directions"
+    case getCurrentLocation = "get_current_location"
+    case geocodeAddress = "geocode_address"
+    case reverseGeocodeLocation = "reverse_geocode_location"
+    case searchNearbyPlaces = "search_nearby_places"
+    case getHealthSummary = "get_health_summary"
+    case getSleepSummary = "get_sleep_summary"
+    case listHealthWorkouts = "list_health_workouts"
+    case listScheduledWorkouts = "list_scheduled_workouts"
+    case scheduleWorkout = "schedule_workout"
+    case removeScheduledWorkout = "remove_scheduled_workout"
+    case searchContacts = "search_contacts"
 
     var requiresPhotoAccess: Bool {
         switch self {
         case .composeEmail, .openYouTubeVideo,
-             .openGoogleMapsSearch, .openGoogleMapsDirections:
+             .openGoogleMapsSearch, .openGoogleMapsDirections,
+             .getCurrentLocation, .geocodeAddress,
+             .reverseGeocodeLocation, .searchNearbyPlaces,
+             .getHealthSummary, .getSleepSummary, .listHealthWorkouts,
+             .listScheduledWorkouts, .scheduleWorkout,
+             .removeScheduledWorkout, .searchContacts:
             false
         case .searchPhotos, .getPhotoDetails, .analyzePhotos, .listAlbums,
              .findAlbum, .createAlbum, .renameAlbum, .deleteAlbum,
@@ -190,6 +211,17 @@ enum ToolName: String, Sendable {
         case .openYouTubeVideo: "准备 YouTube 视频"
         case .openGoogleMapsSearch: "准备地图搜索"
         case .openGoogleMapsDirections: "准备路线规划"
+        case .getCurrentLocation: "读取当前位置"
+        case .geocodeAddress: "解析地址"
+        case .reverseGeocodeLocation: "解析坐标"
+        case .searchNearbyPlaces: "搜索附近地点"
+        case .getHealthSummary: "汇总活动数据"
+        case .getSleepSummary: "汇总睡眠数据"
+        case .listHealthWorkouts: "读取运动历史"
+        case .listScheduledWorkouts: "读取训练计划"
+        case .scheduleWorkout: "安排训练"
+        case .removeScheduledWorkout: "移除训练计划"
+        case .searchContacts: "查找联系人"
         }
     }
 }
@@ -281,6 +313,59 @@ struct MailDraft: Codable, Identifiable, Sendable {
     let bcc: [String]
     let subject: String
     let body: String
+    let isHTML: Bool
+    let attachmentPhotoIDs: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case id, to, cc, bcc, subject, body, isHTML, attachmentPhotoIDs
+    }
+
+    init(
+        id: String,
+        to: [String],
+        cc: [String],
+        bcc: [String],
+        subject: String,
+        body: String,
+        isHTML: Bool = false,
+        attachmentPhotoIDs: [String] = []
+    ) {
+        self.id = id
+        self.to = to
+        self.cc = cc
+        self.bcc = bcc
+        self.subject = subject
+        self.body = body
+        self.isHTML = isHTML
+        self.attachmentPhotoIDs = attachmentPhotoIDs
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        to = try values.decode([String].self, forKey: .to)
+        cc = try values.decode([String].self, forKey: .cc)
+        bcc = try values.decode([String].self, forKey: .bcc)
+        subject = try values.decode(String.self, forKey: .subject)
+        body = try values.decode(String.self, forKey: .body)
+        isHTML = try values.decodeIfPresent(Bool.self, forKey: .isHTML) ?? false
+        attachmentPhotoIDs = try values.decodeIfPresent(
+            [String].self,
+            forKey: .attachmentPhotoIDs
+        ) ?? []
+    }
+}
+
+struct MailAttachment: Sendable {
+    let data: Data
+    let mimeType: String
+    let filename: String
+}
+
+struct MailPresentation: Identifiable, Sendable {
+    var id: String { draft.id }
+    let draft: MailDraft
+    let attachments: [MailAttachment]
 }
 
 struct PendingAction: Codable, Identifiable, Sendable {
@@ -332,6 +417,10 @@ enum WellphoneError: LocalizedError {
     case mailUnavailable
     case externalAppUnavailable
     case userDeclined(String)
+    case permissionRequired(String)
+    case healthUnavailable
+    case workoutUnavailable(String)
+    case attachmentLimit
 
     var errorDescription: String? {
         switch self {
@@ -361,6 +450,14 @@ enum WellphoneError: LocalizedError {
             "无法打开外部 App 或网页。"
         case .userDeclined(let action):
             "用户未批准操作：\(action)"
+        case .permissionRequired(let name):
+            "请先在 Wellphone 设置页授权\(name)。"
+        case .healthUnavailable:
+            "这台设备不支持 HealthKit。"
+        case .workoutUnavailable(let reason):
+            "WorkoutKit 不可用：\(reason)"
+        case .attachmentLimit:
+            "邮件最多附加 3 张照片，压缩后总大小不能超过 15 MB。"
         }
     }
 }
@@ -408,5 +505,22 @@ extension Dictionary where Key == String, Value == JSONValue {
             throw WellphoneError.invalidArguments("\(key) 必须是数字")
         }
         return value
+    }
+
+    func optionalNumber(_ key: String) throws -> Double? {
+        guard let raw = self[key] else { return nil }
+        guard let value = raw.number else {
+            throw WellphoneError.invalidArguments("\(key) 必须是数字")
+        }
+        return value
+    }
+
+    func requiredInteger(_ key: String) throws -> Int {
+        let value = try requiredNumber(key)
+        guard value.rounded() == value,
+              value >= Double(Int.min), value <= Double(Int.max) else {
+            throw WellphoneError.invalidArguments("\(key) 必须是整数")
+        }
+        return Int(value)
     }
 }

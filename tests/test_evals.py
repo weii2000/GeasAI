@@ -49,9 +49,9 @@ def test_eval_output_paths_are_stable() -> None:
 def test_wellphone_eval_suite_has_unique_representative_cases() -> None:
     suite = load_wellphone_suite()
 
-    assert suite.version == "0.1"
-    assert len(suite.cases) == 11
-    assert len({case.case_id for case in suite.cases}) == 11
+    assert suite.version == "0.2"
+    assert len(suite.cases) == 21
+    assert len({case.case_id for case in suite.cases}) == 21
 
     youtube = wellphone_tool_result("search_youtube", {})
     photos = wellphone_tool_result("search_photos", {})

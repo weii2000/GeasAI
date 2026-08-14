@@ -1,7 +1,7 @@
 import hashlib
 import json
 import re
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator, Mapping
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field, replace
 
@@ -225,15 +225,35 @@ class MCPRegistry:
 async def create_mcp_tools(
     registry: MCPRegistry,
     allowed_servers: list[str] | None = None,
+    allowed_tools_by_server: Mapping[str, Collection[str] | None] | None = None,
 ) -> list[AgentTool]:
     servers = list(registry.servers) if allowed_servers is None else allowed_servers
     if unknown := set(servers) - registry.servers.keys():
         raise ValueError(f"Unknown MCP servers: {sorted(unknown)}")
+    if allowed_tools_by_server is not None and (
+        unknown := set(allowed_tools_by_server) - registry.servers.keys()
+    ):
+        raise ValueError(f"Unknown MCP servers in tool allowlist: {sorted(unknown)}")
 
     agent_tools: list[AgentTool] = []
     names: set[str] = set()
     for server in servers:
-        for tool in await registry.list_tools(server):
+        discovered = await registry.list_tools(server)
+        allowed = (
+            allowed_tools_by_server.get(server)
+            if allowed_tools_by_server is not None
+            else None
+        )
+        if allowed is not None:
+            discovered_names = {tool.name for tool in discovered}
+            if missing := set(allowed) - discovered_names:
+                raise ValueError(
+                    f'MCP server "{server}" is missing allowed tools: '
+                    f"{sorted(missing)}"
+                )
+            discovered = [tool for tool in discovered if tool.name in allowed]
+
+        for tool in discovered:
             if not tool.name:
                 raise ValueError(f'MCP server "{server}" returned an unnamed tool')
             try:
