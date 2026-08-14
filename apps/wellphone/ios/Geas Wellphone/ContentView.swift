@@ -36,6 +36,14 @@ struct ContentView: View {
                                 )
                             }
 
+                            if let warning = coordinator.notificationWarning {
+                                Label(warning, systemImage: "bell.slash")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal)
+                            }
+
                             ForEach(coordinator.pendingActions) { action in
                                 PendingActionCard(
                                     action: action,

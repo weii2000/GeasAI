@@ -4,7 +4,12 @@ import asyncio
 import uvicorn
 
 from geas.ai.providers import builtin_models
-from geas.integrations.mcp import MCPRegistry, create_mcp_tools
+from geas.integrations.mcp import (
+    MCPRegistry,
+    create_mcp_tools,
+    mcp_agent_tool_name,
+)
+from geas.integrations.mcp_oauth import MCPAuthorizationRequired
 
 from .config import WellphoneConfig, load_config
 from .observability import configure_logging
@@ -44,10 +49,26 @@ async def _run_server(
         )
 
     async with MCPRegistry(config.mcp_servers) as registry:
-        extra_tools = await create_mcp_tools(
-            registry,
-            allowed_tools_by_server=config.mcp_tool_allowlists,
-        )
+        try:
+            extra_tools = await create_mcp_tools(
+                registry,
+                allowed_tools_by_server=config.mcp_tool_allowlists,
+            )
+        except MCPAuthorizationRequired as error:
+            raise RuntimeError(
+                f'{error}; run "uv run python -m '
+                f'apps.wellphone.mcp_login {error.server}" first'
+            ) from error
+        approval_tools = {
+            mcp_agent_tool_name(server, tool): (server, tool)
+            for server, tools in config.mcp_approval_tools.items()
+            for tool in tools
+        }
+        missing = approval_tools.keys() - {tool.name for tool in extra_tools}
+        if missing:
+            raise ValueError(
+                f"MCP approval tools were not discovered: {sorted(missing)}"
+            )
         service = WellphoneService(
             model,
             models.stream,
@@ -55,6 +76,7 @@ async def _run_server(
             memory_model=memory_model,
             memory_stream_function=models.stream,
             extra_tools=extra_tools,
+            mcp_approval_tools=approval_tools,
         )
         server = uvicorn.Server(
             uvicorn.Config(

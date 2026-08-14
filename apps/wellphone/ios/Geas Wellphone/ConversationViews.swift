@@ -76,6 +76,9 @@ struct SettingsView: View {
                 PermissionRow(name: "训练计划", status: permissions.workoutStatus) {
                     Task { await permissions.requestWorkout() }
                 }
+                PermissionRow(name: "通知", status: permissions.notificationStatus) {
+                    Task { await permissions.requestNotifications() }
+                }
                 Button("打开系统设置", systemImage: "gear") {
                     guard let url = URL(string: UIApplication.openSettingsURLString) else {
                         return
@@ -85,7 +88,7 @@ struct SettingsView: View {
             } header: {
                 Text("设备权限")
             } footer: {
-                Text("权限只会在你点击授权时请求；拒绝后可在系统设置中修改。")
+                Text("可在这里提前授权；相关功能首次使用时也可能请求。拒绝后可在系统设置中修改。")
             }
 
             if let error = permissions.errorMessage {

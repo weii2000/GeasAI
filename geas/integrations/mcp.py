@@ -4,6 +4,7 @@ import re
 from collections.abc import Collection, Iterator, Mapping
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 
 import httpx2
 from jsonschema import Draft202012Validator
@@ -23,6 +24,10 @@ from mcp.types import (
 
 from geas.ai.types import TextContent
 from geas.core.types import AgentTool, AgentToolResult
+from geas.integrations.mcp_oauth import (
+    MCPOAuthConfig,
+    create_oauth_provider,
+)
 
 
 _MAX_TOOL_NAME_LENGTH = 64
@@ -32,6 +37,11 @@ _MAX_TOOL_NAME_LENGTH = 64
 class MCPServerConfig:
     url: str
     token: str | None = field(default=None, repr=False)
+    oauth: MCPOAuthConfig | None = None
+
+    def __post_init__(self) -> None:
+        if self.token is not None and self.oauth is not None:
+            raise ValueError("MCP bearer token and OAuth are mutually exclusive")
 
 
 class _BearerAuth(httpx2.Auth):
@@ -50,8 +60,16 @@ class _BearerAuth(httpx2.Auth):
 
 
 class MCPRegistry:
-    def __init__(self, servers: dict[str, MCPServerConfig]) -> None:
+    def __init__(
+        self,
+        servers: dict[str, MCPServerConfig],
+        *,
+        interactive_oauth: bool = False,
+        oauth_storage_root: Path | None = None,
+    ) -> None:
         self.servers = dict(servers)
+        self.interactive_oauth = interactive_oauth
+        self.oauth_storage_root = oauth_storage_root
         self._clients: dict[str, Client] = {}
         self._stack: AsyncExitStack | None = None
 
@@ -78,6 +96,8 @@ class MCPRegistry:
             config = self.servers[server]
         except KeyError as error:
             raise KeyError(f'Unknown MCP server: "{server}"') from error
+        if config.oauth is not None:
+            raise ValueError(f'MCP server "{server}" uses OAuth')
         self.servers[server] = replace(config, token=token)
 
     async def list_tools(self, server: str) -> list[MCPTool]:
@@ -206,9 +226,21 @@ class MCPRegistry:
         except KeyError as error:
             raise KeyError(f'Unknown MCP server: "{server}"') from error
 
+        auth: httpx2.Auth = _BearerAuth(self, server)
+        if config.oauth is not None:
+            auth, flow = await create_oauth_provider(
+                server,
+                config.url,
+                config.oauth,
+                interactive=self.interactive_oauth,
+                storage_root=self.oauth_storage_root,
+            )
+            if flow is not None:
+                await self._stack.enter_async_context(flow)
+
         http_client = await self._stack.enter_async_context(
             httpx2.AsyncClient(
-                auth=_BearerAuth(self, server),
+                auth=auth,
                 timeout=httpx2.Timeout(30.0, read=300.0),
                 follow_redirects=True,
             )
@@ -267,7 +299,7 @@ async def create_mcp_tools(
                 raise ValueError(
                     f'MCP tool "{server}/{tool.name}" has an invalid input schema'
                 )
-            name = _agent_tool_name(server, tool.name)
+            name = mcp_agent_tool_name(server, tool.name)
             if name in names:
                 raise ValueError(f'Duplicate MCP agent tool name: "{name}"')
             names.add(name)
@@ -275,7 +307,7 @@ async def create_mcp_tools(
     return agent_tools
 
 
-def _agent_tool_name(server: str, tool: str) -> str:
+def mcp_agent_tool_name(server: str, tool: str) -> str:
     raw = f"mcp__{server}__{tool}"
     safe = re.sub(r"[^A-Za-z0-9_-]+", "_", raw)
     if len(safe) <= _MAX_TOOL_NAME_LENGTH:

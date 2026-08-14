@@ -17,7 +17,7 @@ Wellphone 将“决策”和“执行”分离：
 - **Long-term Memory**：按设备保存可见 raw turn，通过 Gate 按需检索 facts/events，并每六轮批量提取；
 - **Tool Broker**：把同步的 Agent Tool Call 转换为手机可轮询的任务，并等待结果；
 - **Server Tool**：使用只保存在 Mac 的凭据调用 YouTube Data API；
-- **MCP Tool**：启动时从受信任的 MCP Server 发现并挂载，在 Mac 侧直接执行；
+- **MCP Tool**：启动时从受信任的 MCP Server 发现并挂载，在 Mac 侧直接执行；HTTP Server 可使用静态 Bearer 或 OAuth 2.1；
 - **iOS Executor**：校验工具作用域，调用原生 Kit 或构造受限的外部 App 链接；
 - **Job Coordinator**：管理任务状态、取消和 iOS 后台执行生命周期；
 - **Task Lifecycle**：区分运行、等待手机、完成、失败和取消；取消不是错误；
@@ -62,9 +62,9 @@ sequenceDiagram
 | 健康 | 活动汇总、睡眠汇总、运动历史 | HealthKit | 只读；先在设备端聚合 |
 | 训练 | 查看、创建、移除简单训练计划 | WorkoutKit | 写操作确认；使用稳定 ID 防止重复创建 |
 | 联系人 | 按姓名查找邮箱 | Contacts | 只读取姓名与邮箱 |
-| 邮件 | 收件人、抄送、HTML、照片附件草稿 | MessageUI | 用户在系统 Mail 中最终发送 |
+| 邮件草稿 | 收件人、抄送、HTML、照片附件 | MessageUI | 用户在系统 Mail 中最终发送 |
 | 外部服务 | YouTube 搜索、地图与视频跳转 | Server API / Universal Link | 结果进入 Pending Action，用户决定何时打开 |
-| MCP | 启动时发现并挂载远端工具 | Streamable HTTP MCP | 每个 Server 必须配置 Tool allowlist |
+| MCP | Notion 搜索与页面读写 | Streamable HTTP MCP | Tool allowlist；写入需手机确认 |
 
 ## 模块边界
 
@@ -104,7 +104,8 @@ sequenceDiagram
 - 健康数据只读且先在手机聚合；位置仅在明确任务中单次读取；
 - YouTube API Key 只保存在 Mac；Google Maps 与 YouTube 跳转只允许固定 HTTPS 域名；
 - 每个 MCP Server 必须显式配置允许挂载的原始 Tool 名；未知 Tool 会让 Server 启动失败；
-- 邮件 MCP 只允许搜索和读取；回复统一进入原生 Mail 草稿；
+- OAuth Token 按 Server URL 隔离保存在 Mac 的 `~/.geas/mcp/oauth`，不会进入 Session、日志或仓库；
+- Notion 只挂载搜索、读取、创建和更新页面；创建或更新在实际调用前通过手机确认；
 - 邮件与外部 App 动作只在用户点击通知或卡片后打开，Agent 不能静默切换前台应用；
 - 客户端生成任务 UUID，Tool Call 在结果确认前可重复获取，降低断网造成的重复执行；
 - 每台设备生成独立 ID 并只能访问所属 Session；该 ID 用于原型隔离，不等同于公网认证；
@@ -120,5 +121,16 @@ sequenceDiagram
 - MCP Tool Catalog 在 Server 启动时固定，远端工具变化后需要重启刷新；
 - HealthKit 无法向 App 区分“无数据”和“用户拒绝读取”；回答必须保留这一隐私语义；
 - WorkoutKit 计划需要受支持且已配对 Apple Watch；没有手表时会返回能力不可用；
-- 原生 Mail 不提供收件箱读取 API，搜索和读取邮件依赖配置的只读 MCP Server；
+- 原生 Mail 不提供收件箱读取 API；当前未接入邮箱读取，后续可通过只读 MCP Server 扩展；
 - 照片是否语义匹配最终仍依赖模型判断。
+
+## 外部服务 OAuth
+
+OAuth 首次授权在 Mac 完成，Wellphone Server 启动期间不会弹出登录页面。先在
+`.env` 配置对应 Client，再运行一次登录命令。
+
+Notion 使用通用 MCP OAuth：
+
+```bash
+uv run python -m apps.wellphone.mcp_login notion
+```

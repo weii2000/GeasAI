@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from time import perf_counter
@@ -46,6 +47,7 @@ class WellphoneService:
         memory_stream_function: StreamFunction | None = None,
         memory_root: Path | None = None,
         extra_tools: list[AgentTool] | None = None,
+        mcp_approval_tools: Mapping[str, tuple[str, str]] | None = None,
     ) -> None:
         if (memory_model is None) != (memory_stream_function is None):
             raise ValueError(
@@ -56,6 +58,7 @@ class WellphoneService:
         self.memory_model = memory_model
         self.memory_stream_function = memory_stream_function
         self.extra_tools = list(extra_tools or [])
+        self.mcp_approval_tools = dict(mcp_approval_tools or {})
         self.memory_root = (
             memory_root
             or Path.home() / ".geas" / "wellphone" / "memory"
@@ -230,6 +233,7 @@ class WellphoneService:
             self.broker,
             self._set_task_status,
             extra_tools=self.extra_tools,
+            mcp_approval_tools=self.mcp_approval_tools,
             memory=self._memory_for(device_id),
             **saved,
         )

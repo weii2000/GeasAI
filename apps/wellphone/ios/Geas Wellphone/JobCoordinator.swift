@@ -18,6 +18,7 @@ final class JobCoordinator {
     private(set) var status = "尚未开始"
     private(set) var answer = ""
     private(set) var errorMessage: String?
+    private(set) var notificationWarning: String?
     private(set) var messages: [ConversationMessage] = []
     private(set) var activities: [TaskActivity] = []
     private(set) var sessionID = UserDefaults.standard.string(
@@ -71,6 +72,7 @@ final class JobCoordinator {
         activities = []
         answer = ""
         errorMessage = nil
+        notificationWarning = nil
         status = "新对话"
         UserDefaults.standard.removeObject(forKey: "wellphone.sessionID")
     }
@@ -78,6 +80,7 @@ final class JobCoordinator {
     func start(prompt: String) {
         guard !isRunning else { return }
         errorMessage = nil
+        notificationWarning = nil
         activities = []
         let cleanPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanPrompt.isEmpty else {
@@ -129,6 +132,7 @@ final class JobCoordinator {
                 finishRunningActivity(as: .failed)
                 await syncSessionIfPossible()
                 await cancelOnServerIfNeeded()
+                await notifyFailure()
                 finish(success: false)
             }
         }
@@ -185,7 +189,7 @@ final class JobCoordinator {
                 finishRunningActivity(as: .completed)
                 await syncSessionIfPossible()
                 let actions = publishRunActions()
-                await notify(actions)
+                await notifyCompletion(actions)
                 status = actions.isEmpty ? "已完成" : "已完成，等待你处理"
                 finish(success: true)
                 return
@@ -222,7 +226,7 @@ final class JobCoordinator {
                     self.advanceProgress(title: detail, amount: 1)
                 },
                 approve: { approval in
-                    await self.requestApproval(approval)
+                    await self.requestApproval(approval, callID: call.callID)
                 },
                 onPendingAction: { action in
                     self.prepareAction(action)
@@ -242,10 +246,24 @@ final class JobCoordinator {
         throw CancellationError()
     }
 
-    private func requestApproval(_ approval: ToolApproval) async -> Bool {
+    private func requestApproval(
+        _ approval: ToolApproval,
+        callID: String
+    ) async -> Bool {
         status = "等待你确认：\(approval.title)"
         advanceProgress(title: "需要确认，请返回 Wellphone", amount: 1)
-        return await withTaskCancellationHandler {
+        let notificationID = "wellphone.approval.\(callID)"
+        await postNotification(
+            id: notificationID,
+            title: "有一项操作需要确认",
+            body: "点击返回 Wellphone 查看并确认。"
+        )
+        let timeout = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(170))
+            guard !Task.isCancelled else { return }
+            self?.resolveApproval(false)
+        }
+        let approved = await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 resolveApproval(false)
                 pendingApproval = approval
@@ -256,6 +274,9 @@ final class JobCoordinator {
                 self?.resolveApproval(false)
             }
         }
+        timeout.cancel()
+        removeNotification(id: notificationID)
+        return approved
     }
 
     private func resolveApproval(_ approved: Bool) {
@@ -373,9 +394,16 @@ final class JobCoordinator {
     }
 
     private func requestNotificationAuthorization() async {
-        _ = try? await notificationCenter.requestAuthorization(
-            options: [.alert, .sound]
-        )
+        do {
+            let granted = try await notificationCenter.requestAuthorization(
+                options: [.alert, .sound]
+            )
+            if !granted {
+                notificationWarning = "系统通知未开启，后台结果需要返回 App 查看。"
+            }
+        } catch {
+            notificationWarning = "无法请求系统通知权限，请在设置中检查。"
+        }
     }
 
     private func prepareAction(_ action: PendingAction) {
@@ -400,28 +428,88 @@ final class JobCoordinator {
         return actions
     }
 
-    private func notify(_ actions: [PendingAction]) async {
+    private func notifyCompletion(_ actions: [PendingAction]) async {
+        if actions.isEmpty {
+            await postNotification(
+                id: taskNotificationID("completed"),
+                title: "任务已完成",
+                body: "点击返回 Wellphone 查看结果。"
+            )
+            return
+        }
         for action in actions {
-            let content = UNMutableNotificationContent()
-            content.title = action.title
-            content.body = action.detail
-            content.sound = .default
-            content.categoryIdentifier = WellphoneNotification.categoryID
-            content.userInfo = [WellphoneNotification.actionIDKey: action.id]
-            try? await notificationCenter.add(
+            await postNotification(
+                id: action.id,
+                title: action.kind == .mail
+                    ? "邮件草稿已准备"
+                    : "内容已准备",
+                body: "点击返回 Wellphone 处理。",
+                actionID: action.id
+            )
+        }
+    }
+
+    private func notifyFailure() async {
+        await postNotification(
+            id: taskNotificationID("failed"),
+            title: "任务处理失败",
+            body: "点击返回 Wellphone 查看详情。"
+        )
+    }
+
+    private func postNotification(
+        id: String,
+        title: String,
+        body: String,
+        actionID: String? = nil
+    ) async {
+        guard UIApplication.shared.applicationState != .active else { return }
+        let settings = await notificationCenter.notificationSettings()
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            break
+        case .denied, .notDetermined:
+            notificationWarning = "系统通知未开启，后台结果需要返回 App 查看。"
+            return
+        @unknown default:
+            notificationWarning = "无法确认系统通知状态，请在设置中检查。"
+            return
+        }
+
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        content.categoryIdentifier = WellphoneNotification.categoryID
+        if let actionID {
+            content.userInfo = [WellphoneNotification.actionIDKey: actionID]
+        }
+        do {
+            try await notificationCenter.add(
                 UNNotificationRequest(
-                    identifier: action.id,
+                    identifier: id,
                     content: content,
                     trigger: nil
                 )
             )
+        } catch {
+            notificationWarning = "系统通知未发送，请在设置中检查通知权限。"
         }
+    }
+
+    private func taskNotificationID(_ outcome: String) -> String {
+        "wellphone.task.\(serverTaskID ?? "current").\(outcome)"
+    }
+
+    private func removeNotification(id: String) {
+        notificationCenter.removePendingNotificationRequests(withIdentifiers: [id])
+        notificationCenter.removeDeliveredNotifications(withIdentifiers: [id])
     }
 
     private func removePendingAction(id: String) {
         pendingActions.removeAll { $0.id == id }
         savePendingActions()
-        notificationCenter.removeDeliveredNotifications(withIdentifiers: [id])
+        removeNotification(id: id)
     }
 
     private func savePendingActions() {

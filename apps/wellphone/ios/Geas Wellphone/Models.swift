@@ -138,6 +138,7 @@ struct ServerSession: Codable, Sendable {
 }
 
 enum ToolName: String, Sendable {
+    case confirmMCPAction = "confirm_mcp_action"
     case searchPhotos = "search_photos"
     case getPhotoDetails = "get_photo_details"
     case analyzePhotos = "analyze_photos"
@@ -172,7 +173,7 @@ enum ToolName: String, Sendable {
 
     var requiresPhotoAccess: Bool {
         switch self {
-        case .composeEmail, .openYouTubeVideo,
+        case .confirmMCPAction, .composeEmail, .openYouTubeVideo,
              .openGoogleMapsSearch, .openGoogleMapsDirections,
              .getCurrentLocation, .geocodeAddress,
              .reverseGeocodeLocation, .searchNearbyPlaces,
@@ -191,6 +192,7 @@ enum ToolName: String, Sendable {
 
     var displayName: String {
         switch self {
+        case .confirmMCPAction: "确认外部服务写入"
         case .searchPhotos: "查找照片"
         case .getPhotoDetails: "读取照片信息"
         case .analyzePhotos: "设备端识别照片"

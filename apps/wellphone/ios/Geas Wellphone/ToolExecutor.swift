@@ -72,6 +72,23 @@ final class ToolExecutor {
         onPendingAction: (PendingAction) -> Void
     ) async throws -> [String: JSONValue] {
         switch name {
+        case .confirmMCPAction:
+            let server = try arguments.requiredString("server")
+            let tool = try arguments.requiredString("tool")
+            let preview = try arguments.requiredString("arguments_preview")
+            guard server.count <= 64, tool.count <= 128, preview.count <= 800 else {
+                throw WellphoneError.invalidArguments("MCP 确认信息过长")
+            }
+            try await requireApproval(
+                ToolApproval(
+                    title: "允许修改外部服务？",
+                    message: "\(server) 将执行 \(tool)：\n\(preview)",
+                    destructive: false
+                ),
+                approve
+            )
+            return ["approved": .bool(true)]
+
         case .getCurrentLocation:
             return try await location.currentLocation()
 

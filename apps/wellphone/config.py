@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 from dotenv import load_dotenv
 
 from geas.integrations.mcp import MCPServerConfig
+from geas.integrations.mcp_oauth import MCPOAuthConfig
 
 
 ENV_PATH = Path(__file__).with_name(".env")
@@ -22,6 +23,7 @@ class WellphoneConfig:
     tool_timeout: float
     mcp_servers: dict[str, MCPServerConfig]
     mcp_tool_allowlists: dict[str, frozenset[str] | None]
+    mcp_approval_tools: dict[str, frozenset[str]]
 
 
 def load_config() -> WellphoneConfig:
@@ -52,6 +54,7 @@ def load_config() -> WellphoneConfig:
         raise ValueError("WELLPHONE_PORT must be between 1 and 65535")
 
     mcp_servers = _load_mcp_servers()
+    allowlists = _load_mcp_tool_allowlists(mcp_servers)
     return WellphoneConfig(
         provider=provider,
         model=model,
@@ -61,7 +64,11 @@ def load_config() -> WellphoneConfig:
         port=port,
         tool_timeout=tool_timeout,
         mcp_servers=mcp_servers,
-        mcp_tool_allowlists=_load_mcp_tool_allowlists(mcp_servers),
+        mcp_tool_allowlists=allowlists,
+        mcp_approval_tools=_load_mcp_approval_tools(
+            mcp_servers,
+            allowlists,
+        ),
     )
 
 
@@ -86,8 +93,30 @@ def _load_mcp_servers() -> dict[str, MCPServerConfig]:
             or not parsed.netloc
         ):
             raise ValueError(f"Invalid MCP server configuration: {variable}")
-        token = os.getenv(f"{prefix}{name.upper()}_TOKEN")
-        servers[name] = MCPServerConfig(url=url, token=token or None)
+        base = f"{prefix}{name.upper()}"
+        token = _optional(base + "_TOKEN")
+        auth = _optional(base + "_AUTH")
+        client_id = _optional(base + "_CLIENT_ID")
+        client_secret = _optional(base + "_CLIENT_SECRET")
+        oauth: MCPOAuthConfig | None = None
+        if auth == "oauth":
+            if token is not None:
+                raise ValueError(f"{base}_TOKEN cannot be used with OAuth")
+            oauth = MCPOAuthConfig(
+                client_id=client_id,
+                client_secret=client_secret,
+            )
+        elif auth == "bearer":
+            if token is None:
+                raise ValueError(f"{base}_TOKEN is required for bearer auth")
+        elif auth == "none":
+            if token is not None or client_id is not None or client_secret is not None:
+                raise ValueError(f"{base}_AUTH=none cannot include credentials")
+        elif auth is not None:
+            raise ValueError(f"{base}_AUTH must be none, bearer, or oauth")
+        elif client_id is not None or client_secret is not None:
+            raise ValueError(f"{base}_AUTH=oauth is required for OAuth credentials")
+        servers[name] = MCPServerConfig(url=url, token=token, oauth=oauth)
 
     return servers
 
@@ -112,6 +141,32 @@ def _load_mcp_tool_allowlists(
             )
         allowlists[server] = tools
     return allowlists
+
+
+def _load_mcp_approval_tools(
+    servers: dict[str, MCPServerConfig],
+    allowlists: dict[str, frozenset[str] | None],
+) -> dict[str, frozenset[str]]:
+    approvals: dict[str, frozenset[str]] = {}
+    for server in servers:
+        variable = f"WELLPHONE_MCP_{server.upper()}_APPROVAL_TOOLS"
+        raw = os.getenv(variable, "")
+        tools = frozenset(item.strip() for item in raw.split(",") if item.strip())
+        if "*" in tools:
+            raise ValueError(f"{variable} must list tools explicitly")
+        allowed = allowlists[server]
+        if allowed is not None and not tools <= allowed:
+            raise ValueError(f"{variable} must be a subset of the tool allowlist")
+        approvals[server] = tools
+    return approvals
+
+
+def _optional(name: str) -> str | None:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None
 
 
 def _integer(name: str, default: int) -> int:

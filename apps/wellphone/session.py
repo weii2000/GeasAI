@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -56,6 +56,7 @@ class WellphoneSession:
         on_task_status: OnTaskStatus,
         *,
         extra_tools: list[AgentTool] | None = None,
+        mcp_approval_tools: Mapping[str, tuple[str, str]] | None = None,
         memory: MemoryService | None = None,
         messages: list[ConversationMessage] | None = None,
         created_at: str | None = None,
@@ -75,6 +76,7 @@ class WellphoneSession:
             model,
             stream_function,
             extra_tools,
+            mcp_approval_tools,
         )
 
     async def prompt(

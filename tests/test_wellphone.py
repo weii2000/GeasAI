@@ -11,10 +11,12 @@ from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
 
 import apps.wellphone.main
+import apps.wellphone.mcp_login
 from apps.wellphone.agent import TOOL_SPECS, _youtube_result, create_phone_agent
 from apps.wellphone.broker import ToolBroker
 from apps.wellphone.config import (
     WellphoneConfig,
+    _load_mcp_approval_tools,
     _load_mcp_servers,
     _load_mcp_tool_allowlists,
 )
@@ -25,7 +27,11 @@ from geas.ai.event_stream import AssistantResponseStream
 from geas.ai.providers.deepseek import DEEPSEEK_MODELS
 from geas.ai.types import ResponseErrorEvent, TextContent
 from geas.core.types import AgentTool, AgentToolResult
-from geas.integrations.mcp import MCPServerConfig
+from geas.integrations.mcp import MCPServerConfig, mcp_agent_tool_name
+from geas.integrations.mcp_oauth import (
+    MCPAuthorizationRequired,
+    MCPOAuthConfig,
+)
 from geas.memory import MemoryService
 
 from .helpers import ScriptedModel, make_assistant, make_tool_call
@@ -67,6 +73,10 @@ def test_wellphone_mcp_config_validates_url_and_token(monkeypatch) -> None:
     assert _load_mcp_tool_allowlists(servers) == {
         "notes": frozenset({"search_notes", "read_note"})
     }
+    assert _load_mcp_approval_tools(
+        servers,
+        {"notes": frozenset({"search_notes", "read_note"})},
+    ) == {"notes": frozenset()}
 
     monkeypatch.setenv("WELLPHONE_MCP_NOTES_TOOLS", "*")
     assert _load_mcp_tool_allowlists(servers) == {"notes": None}
@@ -77,6 +87,41 @@ def test_wellphone_mcp_config_validates_url_and_token(monkeypatch) -> None:
 
     monkeypatch.setenv("WELLPHONE_MCP_BROKEN_URL", "ftp://example/mcp")
     with pytest.raises(ValueError, match="WELLPHONE_MCP_BROKEN_URL"):
+        _load_mcp_servers()
+
+    monkeypatch.delenv("WELLPHONE_MCP_BROKEN_URL")
+    monkeypatch.delenv("WELLPHONE_MCP_NOTES_URL")
+    monkeypatch.delenv("WELLPHONE_MCP_NOTES_TOKEN")
+    monkeypatch.setenv("WELLPHONE_MCP_NOTION_URL", "https://mcp.notion.com/mcp")
+    monkeypatch.setenv("WELLPHONE_MCP_NOTION_AUTH", "oauth")
+    monkeypatch.setenv(
+        "WELLPHONE_MCP_NOTION_TOOLS",
+        "notion-search,notion-create-pages",
+    )
+    monkeypatch.setenv(
+        "WELLPHONE_MCP_NOTION_APPROVAL_TOOLS",
+        "notion-create-pages",
+    )
+    servers = _load_mcp_servers()
+    assert servers["notion"].oauth == MCPOAuthConfig()
+    allowlists = _load_mcp_tool_allowlists(servers)
+    assert _load_mcp_approval_tools(servers, allowlists)["notion"] == {
+        "notion-create-pages"
+    }
+
+    monkeypatch.setenv(
+        "WELLPHONE_MCP_NOTION_APPROVAL_TOOLS",
+        "notion-update-page",
+    )
+    with pytest.raises(ValueError, match="subset"):
+        _load_mcp_approval_tools(servers, allowlists)
+    monkeypatch.setenv(
+        "WELLPHONE_MCP_NOTION_APPROVAL_TOOLS",
+        "notion-create-pages",
+    )
+
+    monkeypatch.setenv("WELLPHONE_MCP_NOTION_TOKEN", "conflict")
+    with pytest.raises(ValueError, match="cannot be used with OAuth"):
         _load_mcp_servers()
 
 
@@ -95,6 +140,7 @@ def test_wellphone_server_lifecycle_owns_mcp_registry(monkeypatch) -> None:
         tool_timeout=1,
         mcp_servers=mcp_servers,
         mcp_tool_allowlists={"notes": frozenset({"search"})},
+        mcp_approval_tools={},
     )
 
     class FakeModels:
@@ -117,11 +163,14 @@ def test_wellphone_server_lifecycle_owns_mcp_registry(monkeypatch) -> None:
     async def discover(_registry: object, **options: object) -> list[str]:
         assert options["allowed_tools_by_server"] == config.mcp_tool_allowlists
         events.append("discover")
-        return ["mcp-tool"]
+        return [SimpleNamespace(name="mcp__notes__search")]
 
     class FakeService:
         def __init__(self, *_args: object, **options: object) -> None:
-            assert options["extra_tools"] == ["mcp-tool"]
+            assert [tool.name for tool in options["extra_tools"]] == [
+                "mcp__notes__search",
+            ]
+            assert options["mcp_approval_tools"] == {}
             events.append("service")
 
     class FakeServer:
@@ -183,6 +232,71 @@ def test_wellphone_server_lifecycle_owns_mcp_registry(monkeypatch) -> None:
             )
         )
     assert events == ["registry_enter", "registry_exit"]
+
+    async def needs_login(_registry: object, **_options: object) -> list[str]:
+        raise MCPAuthorizationRequired("notes")
+
+    monkeypatch.setattr(apps.wellphone.main, "create_mcp_tools", needs_login)
+    with pytest.raises(RuntimeError, match="mcp_login notes"):
+        asyncio.run(
+            apps.wellphone.main._run_server(
+                config,
+                SimpleNamespace(
+                    host="127.0.0.1",
+                    port=8000,
+                    tool_timeout=1,
+                ),
+            )
+        )
+
+
+def test_wellphone_mcp_login_is_interactive_and_scoped(monkeypatch) -> None:
+    oauth_server = MCPServerConfig(
+        "https://mcp.notion.com/mcp",
+        oauth=MCPOAuthConfig(),
+    )
+    config = WellphoneConfig(
+        provider="test",
+        model="agent",
+        memory_provider="test",
+        memory_model="memory",
+        host="127.0.0.1",
+        port=8000,
+        tool_timeout=1,
+        mcp_servers={"notion": oauth_server},
+        mcp_tool_allowlists={"notion": frozenset({"notion-search"})},
+        mcp_approval_tools={"notion": frozenset()},
+    )
+
+    class FakeRegistry:
+        def __init__(self, servers: object, *, interactive_oauth: bool) -> None:
+            assert servers == {"notion": oauth_server}
+            assert interactive_oauth
+
+        async def __aenter__(self) -> "FakeRegistry":
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            pass
+
+    async def discover(_registry: object, **options: object) -> list[object]:
+        assert options == {
+            "allowed_servers": ["notion"],
+            "allowed_tools_by_server": {
+                "notion": frozenset({"notion-search"})
+            },
+        }
+        return [SimpleNamespace(name="mcp__notion__notion-search")]
+
+    monkeypatch.setattr(apps.wellphone.mcp_login, "MCPRegistry", FakeRegistry)
+    monkeypatch.setattr(
+        apps.wellphone.mcp_login,
+        "create_mcp_tools",
+        discover,
+    )
+    assert asyncio.run(
+        apps.wellphone.mcp_login.login(config, "notion")
+    ) == ["mcp__notion__notion-search"]
 
 
 def test_wellphone_mcp_tool_runs_on_server_and_restores(
@@ -281,6 +395,66 @@ def test_phone_agent_rejects_duplicate_tool_name() -> None:
             ScriptedModel([]),
             [duplicate],
         )
+
+
+def test_mcp_write_requires_phone_approval() -> None:
+    approved = False
+    remote_calls: list[tuple[str, str, dict[str, object]]] = []
+    tool_calls: list[dict[str, object]] = []
+
+    async def remote_execute(
+        call_id: str,
+        name: str,
+        arguments: dict[str, object],
+    ) -> ToolResultEnvelope:
+        remote_calls.append((call_id, name, arguments))
+        return ToolResultEnvelope(
+            call_id=call_id,
+            result={"approved": approved},
+            is_error=not approved,
+        )
+
+    async def execute(
+        _call_id: str,
+        arguments: dict[str, object],
+    ) -> AgentToolResult:
+        tool_calls.append(arguments)
+        return AgentToolResult(
+            content=[TextContent(type="text", text="written")]
+        )
+
+    name = mcp_agent_tool_name("notion", "notion-create-pages")
+    tool = AgentTool(
+        name=name,
+        description="Create Notion pages",
+        parameters={"type": "object"},
+        execute=execute,
+    )
+    agent = create_phone_agent(
+        remote_execute,
+        DEEPSEEK_MODELS[0],
+        ScriptedModel([]),
+        [tool],
+        {name: ("notion", "notion-create-pages")},
+    )
+    wrapped = next(item for item in agent.state.tools if item.name == name)
+
+    async def run() -> None:
+        nonlocal approved
+        with pytest.raises(RuntimeError):
+            await wrapped.execute("write-1", {"title": "Roadmap"})
+        assert tool_calls == []
+        approved = True
+        result = await wrapped.execute("write-2", {"title": "Roadmap"})
+        assert result.content[0].text == "written"
+
+    asyncio.run(run())
+    assert tool_calls == [{"title": "Roadmap"}]
+    assert [call[:2] for call in remote_calls] == [
+        ("write-1:approval", "confirm_mcp_action"),
+        ("write-2:approval", "confirm_mcp_action"),
+    ]
+    assert remote_calls[0][2]["server"] == "notion"
 
 
 def test_wellphone_native_tool_contracts_are_unique_and_bounded() -> None:

@@ -3,6 +3,7 @@
 @preconcurrency import HealthKit
 import Observation
 @preconcurrency import Photos
+@preconcurrency import UserNotifications
 import WorkoutKit
 
 @MainActor
@@ -13,6 +14,7 @@ final class PermissionCenter: NSObject, CLLocationManagerDelegate {
     private(set) var healthStatus = "检查中"
     private(set) var contactStatus = "检查中"
     private(set) var workoutStatus = "检查中"
+    private(set) var notificationStatus = "检查中"
     private(set) var errorMessage: String?
 
     private let locationManager = CLLocationManager()
@@ -40,6 +42,15 @@ final class PermissionCenter: NSObject, CLLocationManagerDelegate {
         contactStatus = switch CNContactStore.authorizationStatus(for: .contacts) {
         case .authorized: "已授权"
         case .denied, .restricted, .limited: "未授权"
+        case .notDetermined: "尚未请求"
+        @unknown default: "未知"
+        }
+        notificationStatus = switch await UNUserNotificationCenter.current()
+            .notificationSettings().authorizationStatus {
+        case .authorized: "已授权"
+        case .provisional: "临时授权"
+        case .ephemeral: "临时授权"
+        case .denied: "未授权"
         case .notDetermined: "尚未请求"
         @unknown default: "未知"
         }
@@ -102,6 +113,16 @@ final class PermissionCenter: NSObject, CLLocationManagerDelegate {
             return
         }
         _ = await WorkoutScheduler.shared.requestAuthorization()
+        await refresh()
+    }
+
+    func requestNotifications() async {
+        do {
+            _ = try await UNUserNotificationCenter.current()
+                .requestAuthorization(options: [.alert, .sound])
+        } catch {
+            errorMessage = error.localizedDescription
+        }
         await refresh()
     }
 

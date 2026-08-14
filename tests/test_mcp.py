@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime
+from pathlib import Path
 import re
 from types import SimpleNamespace
 
@@ -13,6 +14,13 @@ from geas.integrations.mcp import (
     MCPServerConfig,
     create_mcp_tools,
 )
+from geas.integrations.mcp_oauth import (
+    BrowserOAuthFlow,
+    FileOAuthStorage,
+    MCPAuthorizationRequired,
+    MCPOAuthConfig,
+)
+from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from apps.blueprint.planwise import login_planwise, publish_plan
 from apps.blueprint.types import Plan, Task
 from mcp.types import (
@@ -149,6 +157,100 @@ def test_mcp_connects_lazily_and_reuses_client(monkeypatch) -> None:
     assert list(auth.auth_flow(request))[0].headers["Authorization"] == (
         "Bearer new-secret"
     )
+
+
+def test_mcp_auth_modes_and_oauth_storage(tmp_path: Path) -> None:
+    oauth = MCPOAuthConfig(client_id="client", client_secret="secret")
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        MCPServerConfig("https://example.com/mcp", token="token", oauth=oauth)
+
+    registry = MCPRegistry(
+        {"oauth": MCPServerConfig("https://example.com/mcp", oauth=oauth)}
+    )
+    with pytest.raises(ValueError, match="uses OAuth"):
+        registry.set_token("oauth", "token")
+
+    async def run() -> None:
+        storage = FileOAuthStorage("HTTPS://EXAMPLE.COM/mcp/", tmp_path)
+        await storage.configure_client(oauth)
+        await storage.set_tokens(
+            OAuthToken(
+                access_token="access",
+                refresh_token="refresh",
+                expires_in=3600,
+            )
+        )
+        restored = FileOAuthStorage("https://example.com/mcp", tmp_path)
+        assert (await restored.get_tokens()).refresh_token == "refresh"  # type: ignore[union-attr]
+        assert (await restored.get_client_info()).client_id == "client"  # type: ignore[union-attr]
+        assert restored.path.stat().st_mode & 0o777 == 0o600
+        assert tmp_path.stat().st_mode & 0o777 == 0o700
+        with pytest.raises(ValueError, match="client_id does not match"):
+            await restored.configure_client(MCPOAuthConfig(client_id="other"))
+
+        restored.path.write_text("not-json")
+        with pytest.raises(ValueError, match="Invalid MCP OAuth store"):
+            await restored.get_tokens()
+
+    asyncio.run(run())
+
+
+def test_mcp_oauth_callback_and_noninteractive_error(monkeypatch) -> None:
+    async def run() -> None:
+        flow = BrowserOAuthFlow(timeout=1, port=0)
+        async with flow:
+            assert flow._accept(
+                "/callback?code=code-1&state=state-1&iss=issuer"
+            ) == (
+                200,
+                "Authorization complete. You may close this window.",
+            )
+            result = await flow.callback()
+            assert result.model_dump() == {
+                "code": "code-1",
+                "state": "state-1",
+                "iss": "issuer",
+            }
+        from geas.integrations.mcp_oauth import create_oauth_provider
+
+        provider, created_flow = await create_oauth_provider(
+            "notes",
+            "https://notes.example/mcp",
+            MCPOAuthConfig(),
+            interactive=False,
+            storage_root=None,
+        )
+        assert created_flow is None
+        provider.context.client_info = OAuthClientInformationFull(
+            client_id="client",
+            client_secret="secret",
+            token_endpoint_auth_method="client_secret_basic",
+        )
+        data, headers = provider.context.prepare_token_auth(
+            {"client_id": "client", "grant_type": "authorization_code"},
+        )
+        assert "client_id" not in data
+        assert "client_secret" not in data
+        assert headers["Authorization"].startswith("Basic ")
+        with pytest.raises(MCPAuthorizationRequired, match="notes"):
+            await provider.context.redirect_handler("https://auth.example")  # type: ignore[misc]
+
+        denied = BrowserOAuthFlow(timeout=1)
+        denied._accept("/callback?error=access_denied")
+        with pytest.raises(RuntimeError, match="access_denied"):
+            await denied.callback()
+
+        with pytest.raises(TimeoutError, match="OAuth callback"):
+            await BrowserOAuthFlow(timeout=0.01).callback()
+
+        monkeypatch.setattr(
+            "geas.integrations.mcp_oauth.ThreadingHTTPServer",
+            lambda *_args: (_ for _ in ()).throw(OSError()),
+        )
+        with pytest.raises(RuntimeError, match="port 8765"):
+            await BrowserOAuthFlow().redirect("https://auth.example")
+
+    asyncio.run(run())
 
 
 def test_mcp_discovers_all_capabilities_with_pagination() -> None:
