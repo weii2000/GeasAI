@@ -4,18 +4,23 @@ import logging
 import sqlite3
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
-from apps.wellphone.agent import _youtube_result
+import apps.wellphone.main
+from apps.wellphone.agent import _youtube_result, create_phone_agent
 from apps.wellphone.broker import ToolBroker
+from apps.wellphone.config import WellphoneConfig, _load_mcp_servers
 from apps.wellphone.protocol import ToolResultEnvelope
 from apps.wellphone.server import create_app
 from apps.wellphone.service import WellphoneService
 from geas.ai.event_stream import AssistantResponseStream
 from geas.ai.providers.deepseek import DEEPSEEK_MODELS
 from geas.ai.types import ResponseErrorEvent, TextContent
+from geas.core.types import AgentTool, AgentToolResult
+from geas.integrations.mcp import MCPServerConfig
 from geas.memory import MemoryService
 
 from .helpers import ScriptedModel, make_assistant, make_tool_call
@@ -41,6 +46,223 @@ def make_service(
         tool_timeout=tool_timeout,
         sessions_root=root,
     )
+
+
+def test_wellphone_mcp_config_validates_url_and_token(monkeypatch) -> None:
+    monkeypatch.setenv(
+        "WELLPHONE_MCP_NOTES_URL",
+        "https://notes.example/mcp",
+    )
+    monkeypatch.setenv("WELLPHONE_MCP_NOTES_TOKEN", "secret")
+
+    servers = _load_mcp_servers()
+    assert servers["notes"].url == "https://notes.example/mcp"
+    assert servers["notes"].token == "secret"
+
+    monkeypatch.setenv("WELLPHONE_MCP_BROKEN_URL", "ftp://example/mcp")
+    with pytest.raises(ValueError, match="WELLPHONE_MCP_BROKEN_URL"):
+        _load_mcp_servers()
+
+
+def test_wellphone_server_lifecycle_owns_mcp_registry(monkeypatch) -> None:
+    events: list[str] = []
+    mcp_servers = {
+        "notes": MCPServerConfig("https://notes.example/mcp")
+    }
+    config = WellphoneConfig(
+        provider="test",
+        model="agent",
+        memory_provider="test",
+        memory_model="memory",
+        host="127.0.0.1",
+        port=8000,
+        tool_timeout=1,
+        mcp_servers=mcp_servers,
+    )
+
+    class FakeModels:
+        stream = object()
+
+        def get_model(self, _provider: str, model: str) -> str:
+            return model
+
+    class FakeRegistry:
+        def __init__(self, servers: object) -> None:
+            assert servers is mcp_servers
+
+        async def __aenter__(self) -> "FakeRegistry":
+            events.append("registry_enter")
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            events.append("registry_exit")
+
+    async def discover(_registry: object) -> list[str]:
+        events.append("discover")
+        return ["mcp-tool"]
+
+    class FakeService:
+        def __init__(self, *_args: object, **options: object) -> None:
+            assert options["extra_tools"] == ["mcp-tool"]
+            events.append("service")
+
+    class FakeServer:
+        def __init__(self, _config: object) -> None:
+            pass
+
+        async def serve(self) -> None:
+            events.append("serve")
+
+    monkeypatch.setattr(apps.wellphone.main, "builtin_models", FakeModels)
+    monkeypatch.setattr(apps.wellphone.main, "MCPRegistry", FakeRegistry)
+    monkeypatch.setattr(apps.wellphone.main, "create_mcp_tools", discover)
+    monkeypatch.setattr(apps.wellphone.main, "WellphoneService", FakeService)
+    monkeypatch.setattr(apps.wellphone.main, "create_app", lambda _: object())
+    monkeypatch.setattr(
+        apps.wellphone.main.uvicorn,
+        "Config",
+        lambda *_args, **_kwargs: object(),
+    )
+    monkeypatch.setattr(apps.wellphone.main.uvicorn, "Server", FakeServer)
+
+    asyncio.run(
+        apps.wellphone.main._run_server(
+            config,
+            SimpleNamespace(
+                host="127.0.0.1",
+                port=8000,
+                tool_timeout=1,
+            ),
+        )
+    )
+
+    assert events == [
+        "registry_enter",
+        "discover",
+        "service",
+        "serve",
+        "registry_exit",
+    ]
+
+    async def fail_discovery(_registry: object) -> list[str]:
+        raise RuntimeError("invalid MCP schema")
+
+    events.clear()
+    monkeypatch.setattr(
+        apps.wellphone.main,
+        "create_mcp_tools",
+        fail_discovery,
+    )
+    with pytest.raises(RuntimeError, match="invalid MCP schema"):
+        asyncio.run(
+            apps.wellphone.main._run_server(
+                config,
+                SimpleNamespace(
+                    host="127.0.0.1",
+                    port=8000,
+                    tool_timeout=1,
+                ),
+            )
+        )
+    assert events == ["registry_enter", "registry_exit"]
+
+
+def test_wellphone_mcp_tool_runs_on_server_and_restores(
+    tmp_path: Path,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    async def execute(
+        _call_id: str,
+        arguments: dict[str, object],
+    ) -> AgentToolResult:
+        calls.append(arguments)
+        return AgentToolResult(
+            content=[TextContent(type="text", text="found")]
+        )
+
+    tool = AgentTool(
+        name="mcp__notes__search",
+        description="Search notes",
+        parameters={"type": "object"},
+        execute=execute,
+    )
+
+    async def run() -> None:
+        stream = ScriptedModel(
+            [
+                make_assistant(
+                    [make_tool_call(tool.name, {"query": "Geas"})],
+                    "toolUse",
+                ),
+                make_assistant(
+                    [TextContent(type="text", text="找到笔记")],
+                    "stop",
+                ),
+            ]
+        )
+        service = WellphoneService(
+            DEEPSEEK_MODELS[0],
+            stream,
+            sessions_root=tmp_path,
+            extra_tools=[tool],
+        )
+        device_id = str(uuid.uuid4())
+        record = service.create_task("搜索笔记", device_id, str(uuid.uuid4()))
+        await service._runs[record.id]
+        await asyncio.sleep(0)
+
+        assert record.status == "completed"
+        assert calls == [{"query": "Geas"}]
+        assert await service.broker.next_call(
+            record.id,
+            wait_seconds=0.01,
+        ) is None
+        assert tool.name not in (
+            tmp_path / f"{record.session_id}.json"
+        ).read_text()
+        await service.close()
+
+        restored = WellphoneService(
+            DEEPSEEK_MODELS[0],
+            ScriptedModel([]),
+            sessions_root=tmp_path,
+            extra_tools=[tool],
+        )
+        session = restored.require_session(record.session_id, device_id)
+        assert tool.name in {item.name for item in session.agent.state.tools}
+        await restored.close()
+
+    asyncio.run(run())
+
+
+def test_phone_agent_rejects_duplicate_tool_name() -> None:
+    async def remote_execute(
+        _call_id: str,
+        _name: str,
+        _arguments: dict[str, object],
+    ) -> ToolResultEnvelope:
+        raise AssertionError("tool must not run")
+
+    async def duplicate_execute(
+        _call_id: str,
+        _arguments: dict[str, object],
+    ) -> AgentToolResult:
+        raise AssertionError("tool must not run")
+
+    duplicate = AgentTool(
+        name="search_photos",
+        description="duplicate",
+        parameters={"type": "object"},
+        execute=duplicate_execute,
+    )
+    with pytest.raises(ValueError, match='Duplicate tool: "search_photos"'):
+        create_phone_agent(
+            remote_execute,
+            DEEPSEEK_MODELS[0],
+            ScriptedModel([]),
+            [duplicate],
+        )
 
 
 def test_broker_redelivers_call_and_accepts_duplicate_result() -> None:

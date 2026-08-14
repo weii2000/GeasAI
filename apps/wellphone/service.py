@@ -8,6 +8,7 @@ from time import perf_counter
 
 from geas.ai.model_registry import StreamFunction
 from geas.ai.types import Model
+from geas.core.types import AgentTool
 from geas.memory import MemoryService
 
 from .broker import ToolBroker
@@ -44,6 +45,7 @@ class WellphoneService:
         memory_model: Model | None = None,
         memory_stream_function: StreamFunction | None = None,
         memory_root: Path | None = None,
+        extra_tools: list[AgentTool] | None = None,
     ) -> None:
         if (memory_model is None) != (memory_stream_function is None):
             raise ValueError(
@@ -53,6 +55,7 @@ class WellphoneService:
         self.stream_function = stream_function
         self.memory_model = memory_model
         self.memory_stream_function = memory_stream_function
+        self.extra_tools = list(extra_tools or [])
         self.memory_root = (
             memory_root
             or Path.home() / ".geas" / "wellphone" / "memory"
@@ -226,6 +229,7 @@ class WellphoneService:
             self.stream_function,
             self.broker,
             self._set_task_status,
+            extra_tools=self.extra_tools,
             memory=self._memory_for(device_id),
             **saved,
         )

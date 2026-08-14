@@ -12,6 +12,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from geas.ai.model_registry import StreamFunction
 from geas.ai.types import Model
+from geas.core.types import AgentTool
 from geas.memory import MemoryItem, MemoryService
 
 from .agent import SYSTEM_PROMPT, create_phone_agent, final_text
@@ -54,6 +55,7 @@ class WellphoneSession:
         broker: ToolBroker,
         on_task_status: OnTaskStatus,
         *,
+        extra_tools: list[AgentTool] | None = None,
         memory: MemoryService | None = None,
         messages: list[ConversationMessage] | None = None,
         created_at: str | None = None,
@@ -72,6 +74,7 @@ class WellphoneSession:
             self._execute_remote,
             model,
             stream_function,
+            extra_tools,
         )
 
     async def prompt(

@@ -1,8 +1,11 @@
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
+
+from geas.integrations.mcp import MCPServerConfig
 
 
 ENV_PATH = Path(__file__).with_name(".env")
@@ -17,6 +20,7 @@ class WellphoneConfig:
     host: str
     port: int
     tool_timeout: float
+    mcp_servers: dict[str, MCPServerConfig]
 
 
 def load_config() -> WellphoneConfig:
@@ -54,7 +58,35 @@ def load_config() -> WellphoneConfig:
         host=host,
         port=port,
         tool_timeout=tool_timeout,
+        mcp_servers=_load_mcp_servers(),
     )
+
+
+def _load_mcp_servers() -> dict[str, MCPServerConfig]:
+    prefix = "WELLPHONE_MCP_"
+    suffix = "_URL"
+    servers: dict[str, MCPServerConfig] = {}
+
+    for variable, raw_url in os.environ.items():
+        if not (
+            variable.startswith(prefix)
+            and variable.endswith(suffix)
+        ):
+            continue
+
+        name = variable[len(prefix) : -len(suffix)].lower()
+        url = raw_url.strip()
+        parsed = urlparse(url)
+        if (
+            not name
+            or parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+        ):
+            raise ValueError(f"Invalid MCP server configuration: {variable}")
+        token = os.getenv(f"{prefix}{name.upper()}_TOKEN")
+        servers[name] = MCPServerConfig(url=url, token=token or None)
+
+    return servers
 
 
 def _integer(name: str, default: int) -> int:

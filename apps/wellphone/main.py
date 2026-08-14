@@ -1,8 +1,10 @@
 import argparse
+import asyncio
 
 import uvicorn
 
 from geas.ai.providers import builtin_models
+from geas.integrations.mcp import MCPRegistry, create_mcp_tools
 
 from .config import WellphoneConfig, load_config
 from .observability import configure_logging
@@ -14,6 +16,13 @@ def main() -> None:
     configure_logging()
     config = load_config()
     args = _parse_args(config)
+    asyncio.run(_run_server(config, args))
+
+
+async def _run_server(
+    config: WellphoneConfig,
+    args: argparse.Namespace,
+) -> None:
     models = builtin_models()
     model = models.get_model(config.provider, config.model)
     if model is None:
@@ -34,14 +43,24 @@ def main() -> None:
             f"{config.memory_provider}/{config.memory_model}"
         )
 
-    service = WellphoneService(
-        model,
-        models.stream,
-        tool_timeout=args.tool_timeout,
-        memory_model=memory_model,
-        memory_stream_function=models.stream,
-    )
-    uvicorn.run(create_app(service), host=args.host, port=args.port)
+    async with MCPRegistry(config.mcp_servers) as registry:
+        extra_tools = await create_mcp_tools(registry)
+        service = WellphoneService(
+            model,
+            models.stream,
+            tool_timeout=args.tool_timeout,
+            memory_model=memory_model,
+            memory_stream_function=models.stream,
+            extra_tools=extra_tools,
+        )
+        server = uvicorn.Server(
+            uvicorn.Config(
+                create_app(service),
+                host=args.host,
+                port=args.port,
+            )
+        )
+        await server.serve()
 
 
 def _parse_args(config: WellphoneConfig) -> argparse.Namespace:

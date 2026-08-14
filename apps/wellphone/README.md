@@ -16,6 +16,7 @@ Wellphone 将“决策”和“执行”分离：
 - **Long-term Memory**：按设备保存可见 raw turn，通过 Gate 按需检索 facts/events，并每六轮批量提取；
 - **Tool Broker**：把同步的 Agent Tool Call 转换为手机可轮询的任务，并等待结果；
 - **Server Tool**：使用只保存在 Mac 的凭据调用 YouTube Data API；
+- **MCP Tool**：启动时从受信任的 MCP Server 发现并挂载，在 Mac 侧直接执行；
 - **iOS Executor**：校验工具作用域，调用原生 Kit 或构造受限的外部 App 链接；
 - **Job Coordinator**：管理任务状态、取消和 iOS 后台执行生命周期；
 - **Task Lifecycle**：区分运行、等待手机、完成、失败和取消；取消不是错误；
@@ -60,6 +61,7 @@ sequenceDiagram
 | service.py | 任务状态、Agent 生命周期与取消 |
 | session.py | 对话上下文、设备归属与 JSON 持久化 |
 | geas/memory | 通用的 SQLite/FTS5、检索 Gate 和 facts/events 提取 |
+| geas/integrations/mcp | 通用 MCP Client、Tool 发现与 Agent Tool Adapter |
 | agent.py | System Prompt、Tool Schema、YouTube 搜索与 Geas Agent 组装 |
 | broker.py | Tool Call 排队、重投递、超时和结果匹配 |
 | protocol.py | Mac 与 iOS 之间的 JSON 数据契约 |
@@ -83,6 +85,7 @@ sequenceDiagram
 - 删除、隐藏、改日期/位置和移出相册等高风险操作必须在手机端再次确认；
 - 邮件工具只填充系统 Mail Composer，最终发送权始终属于用户；
 - YouTube API Key 只保存在 Mac；Google Maps 与 YouTube 跳转只允许固定 HTTPS 域名；
+- 配置的 MCP Server 是工具级信任边界，其全部工具都会暴露给 Agent；当前只应接入可信、优先只读的 Server；
 - 邮件与外部 App 动作只在用户点击通知或卡片后打开，Agent 不能静默切换前台应用；
 - 客户端生成任务 UUID，Tool Call 在结果确认前可重复获取，降低断网造成的重复执行；
 - 每台设备生成独立 ID 并只能访问所属 Session；该 ID 用于原型隔离，不等同于公网认证；
@@ -95,4 +98,5 @@ sequenceDiagram
 - Session 对话可在 Server 重启后恢复，运行中的任务和 Tool Call 不恢复；
 - HTTP 通道没有认证，只适用于可信局域网原型；
 - App Intents 尚未接入，当前入口仍是 Wellphone App；
+- MCP Tool Catalog 在 Server 启动时固定，远端工具变化后需要重启刷新；
 - 照片是否语义匹配最终仍依赖模型判断。
