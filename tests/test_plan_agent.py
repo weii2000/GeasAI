@@ -12,6 +12,7 @@ from geas.ai.types import (
     ToolResultMessage,
     UserMessage,
 )
+from geas.core.types import AgentTool, AgentToolResult
 from apps.blueprint.session_manager import SessionManager
 from apps.blueprint.types import (
     ConversationMessage,
@@ -433,7 +434,24 @@ def test_human_feedback_returns_plan_to_revision() -> None:
 
 
 def test_session_manager_restores_checkpoint(tmp_path) -> None:
-    session, plan_model, _review_model = make_session([])
+    async def execute(
+        _tool_call_id: str,
+        _arguments: dict[str, object],
+    ) -> AgentToolResult:
+        return AgentToolResult(
+            content=[TextContent(type="text", text="done")]
+        )
+
+    current_mcp_tool = AgentTool(
+        name="mcp__tasks__create_task",
+        description="Create a task",
+        parameters={"type": "object"},
+        execute=execute,
+    )
+    session, plan_model, _review_model = make_session(
+        [],
+        extra_tools=[current_mcp_tool],
+    )
     session.phase = Phase.REVIEW
     session.plan = Plan(
         title="Geas 发布计划",
@@ -476,12 +494,13 @@ def test_session_manager_restores_checkpoint(tmp_path) -> None:
 
     assert manager.session_file.parent.stat().st_mode & 0o777 == 0o700
     assert manager.session_file.stat().st_mode & 0o777 == 0o600
+    assert current_mcp_tool.name not in manager.session_file.read_text()
 
     restored = SessionManager.open(
         manager.session_id,
         cwd,
         root,
-    ).load(models)
+    ).load(models, extra_tools=[current_mcp_tool])
 
     assert restored.phase is Phase.REVIEW
     assert restored.plan == session.plan
@@ -491,6 +510,9 @@ def test_session_manager_restores_checkpoint(tmp_path) -> None:
         restored.plan_agent.state.messages
         == session.plan_agent.state.messages
     )
+    assert current_mcp_tool.name in {
+        tool.name for tool in restored.tools_for(Phase.PLAN)
+    }
     assert [
         saved.session_id
         for saved in SessionManager.list_saved(cwd, root)

@@ -15,7 +15,7 @@ geas/
 ├── ai/                  # 模型、消息、Provider、流式事件
 ├── core/                # Agent 状态、Agent Loop、工具执行
 └── integrations/
-    └── mcp.py           # 可复用 MCP 适配
+    └── mcp.py           # 通用 MCP Client 与 Agent Tool Adapter
 
 apps/
 ├── blueprint/           # Blueprint 产品、TUI、Skill、Eval

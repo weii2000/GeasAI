@@ -16,7 +16,7 @@ from geas.ai.types import (
     UsageCost,
 )
 from geas.core.agent import Agent
-from geas.core.types import AgentState
+from geas.core.types import AgentState, AgentTool
 from apps.blueprint.session import (
     PLAN_AGENT_MAX_TURNS,
     REVIEW_AGENT_MAX_TURNS,
@@ -57,6 +57,7 @@ def make_session(
     plan_responses: list[AssistantMessage],
     review_responses: list[AssistantMessage] | None = None,
     skill_registry: SkillRegistry | None = None,
+    extra_tools: list[AgentTool] | None = None,
 ) -> tuple[PlanSession, ScriptedModel, ScriptedModel]:
     plan_model = ScriptedModel(plan_responses)
     review_model = ScriptedModel(review_responses or [])
@@ -77,7 +78,12 @@ def make_session(
         max_turns=REVIEW_AGENT_MAX_TURNS,
     )
     return (
-        PlanSession(plan_agent, review_agent, skill_registry),
+        PlanSession(
+            plan_agent,
+            review_agent,
+            skill_registry,
+            extra_tools=extra_tools,
+        ),
         plan_model,
         review_model,
     )

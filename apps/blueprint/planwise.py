@@ -6,8 +6,8 @@ from datetime import datetime
 from urllib.parse import urlsplit
 
 import httpx2
+from mcp.types import TextContent as MCPTextContent
 
-from geas.ai.types import TextContent
 from geas.integrations.mcp import MCPRegistry
 
 from .types import Plan, Task
@@ -101,21 +101,21 @@ async def publish_plan(
     session_id: str,
     plan: Plan,
 ) -> PlanPublication:
-    result = await registry.call(
+    result = await registry.call_tool(
         PLANWISE_SERVER_NAME,
         "create_plan",
         _create_plan_payload(session_id, plan),
     )
-    data = result.details
+    text = "\n".join(
+        block.text
+        for block in result.content
+        if isinstance(block, MCPTextContent)
+    )
+    if result.is_error:
+        raise RuntimeError(text or "PlanWise create_plan failed")
+
+    data = result.structured_content
     if not isinstance(data, dict):
-        text = next(
-            (
-                block.text
-                for block in result.content
-                if isinstance(block, TextContent)
-            ),
-            "",
-        )
         try:
             data = json.loads(text)
         except (json.JSONDecodeError, TypeError) as error:

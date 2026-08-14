@@ -35,7 +35,7 @@ from geas.core.types import (
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
 )
-from geas.integrations.mcp import MCPRegistry, create_mcp_call_tool
+from geas.integrations.mcp import MCPRegistry, create_mcp_tools
 from apps.blueprint.planwise import (
     PLANWISE_SERVER_NAME,
     PlanWiseAuth,
@@ -61,19 +61,11 @@ class RPCServer:
         models: ModelRegistry,
         mcp_registry: MCPRegistry,
         skills_root: Path,
+        extra_tools: list[AgentTool],
     ) -> None:
         self.models = models
         self.mcp_registry = mcp_registry
-        agent_servers = [
-            server
-            for server in mcp_registry.servers
-            if server != PLANWISE_SERVER_NAME
-        ]
-        self.extra_tools: list[AgentTool] = (
-            [create_mcp_call_tool(mcp_registry, agent_servers)]
-            if agent_servers
-            else []
-        )
+        self.extra_tools = list(extra_tools)
         self.planwise_enabled = (
             PLANWISE_SERVER_NAME in mcp_registry.servers
         )
@@ -454,7 +446,16 @@ async def main() -> None:
     models = builtin_models()
     servers = load_mcp_servers()
     async with MCPRegistry(servers) as registry:
-        server = RPCServer(models, registry, Path(__file__).with_name("skills"))
+        agent_servers = [
+            name for name in servers if name != PLANWISE_SERVER_NAME
+        ]
+        tools = await create_mcp_tools(registry, agent_servers)
+        server = RPCServer(
+            models,
+            registry,
+            Path(__file__).with_name("skills"),
+            tools,
+        )
         try:
             await _serve(server)
         finally:
