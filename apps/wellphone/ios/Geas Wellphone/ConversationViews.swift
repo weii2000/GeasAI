@@ -79,6 +79,9 @@ struct SettingsView: View {
                 PermissionRow(name: "通知", status: permissions.notificationStatus) {
                     Task { await permissions.requestNotifications() }
                 }
+                PermissionRow(name: "提醒事项", status: permissions.reminderStatus) {
+                    Task { await permissions.requestReminders() }
+                }
                 Button("打开系统设置", systemImage: "gear") {
                     guard let url = URL(string: UIApplication.openSettingsURLString) else {
                         return

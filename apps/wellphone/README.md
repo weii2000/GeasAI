@@ -3,7 +3,7 @@
 Wellphone 是建立在 Geas Runtime 上的 iOS Capability Agent。它不模拟点击或接管
 屏幕，而是让 Agent 调用 iOS 原生能力，在用户继续使用手机时处理后台数据任务。
 
-当前实现覆盖照片管理、位置、健康与训练、联系人、邮件起草和受控的外部服务跳转。
+当前实现覆盖照片管理、位置、健康与训练、联系人、系统提醒、邮件起草和受控的外部服务跳转。
 模型负责理解意图和规划步骤；Mac 执行 Server Tool 与 MCP Tool；iPhone 通过 Apple
 原生 Framework 执行私有设备能力。需要切换 App 的结果会保存为待处理动作，并在任务
 完成后通知用户。
@@ -21,7 +21,7 @@ Wellphone 将“决策”和“执行”分离：
 - **iOS Executor**：校验工具作用域，调用原生 Kit 或构造受限的外部 App 链接；
 - **Job Coordinator**：管理任务状态、取消和 iOS 后台执行生命周期；
 - **Task Lifecycle**：区分运行、等待手机、完成、失败和取消；取消不是错误；
-- **Observability**：以 JSON Lines 记录任务和工具生命周期、关联 ID、状态与耗时；
+- **Observability**：以脱敏 JSON Lines 记录模型、记忆、任务与工具生命周期；控制台和本地轮转文件共用同一事件格式；
 - **Pending Action**：持久化邮件、YouTube 与地图结果，由本地通知或 App 内卡片交还用户；
 - **Agent Eval**：使用固定 Tool 结果评估模型的工具选择、参数、安全边界和最终回答；
 - **SwiftUI Client**：提供文字或语音输入、连接配置、进度与最终结果。
@@ -62,6 +62,7 @@ sequenceDiagram
 | 健康 | 活动汇总、睡眠汇总、运动历史 | HealthKit | 只读；先在设备端聚合 |
 | 训练 | 查看、创建、移除简单训练计划 | WorkoutKit | 写操作确认；使用稳定 ID 防止重复创建 |
 | 联系人 | 按姓名查找邮箱 | Contacts | 只读取姓名与邮箱 |
+| 提醒 | 创建普通或带到期时间的提醒 | EventKit | 手机确认后写入；任务/调用 ID 防止重投递重复创建 |
 | 邮件草稿 | 收件人、抄送、HTML、照片附件 | MessageUI | 用户在系统 Mail 中最终发送 |
 | 外部服务 | YouTube 搜索、地图与视频跳转 | Server API / Universal Link | 结果进入 Pending Action，用户决定何时打开 |
 | MCP | Notion 搜索与页面读写 | Streamable HTTP MCP | Tool allowlist；写入需手机确认 |
@@ -89,6 +90,7 @@ sequenceDiagram
 | LocationService.swift | 单次定位、MapKit 地址解析与附近地点搜索 |
 | HealthService.swift / WorkoutService.swift | HealthKit 只读聚合与 WorkoutKit 计划管理 |
 | ContactService.swift / PermissionCenter.swift | 联系人邮箱查询与前台权限入口 |
+| ReminderService.swift | EventKit 授权、提醒写入、保存核验与本地幂等映射 |
 | ContentView.swift | 对话界面、待处理动作、操作审批和系统 Mail Composer |
 
 ## 数据与安全边界
@@ -102,6 +104,7 @@ sequenceDiagram
 - 删除、隐藏、改日期/位置和移出相册等高风险操作必须在手机端再次确认；
 - 邮件工具只填充系统 Mail Composer，最终发送权始终属于用户；
 - 健康数据只读且先在手机聚合；位置仅在明确任务中单次读取；
+- 提醒只在手机确认后写入 EventKit；标题和备注不会进入 Mac Trace；
 - YouTube API Key 只保存在 Mac；Google Maps 与 YouTube 跳转只允许固定 HTTPS 域名；
 - 每个 MCP Server 必须显式配置允许挂载的原始 Tool 名；未知 Tool 会让 Server 启动失败；
 - OAuth Token 按 Server URL 隔离保存在 Mac 的 `~/.geas/mcp/oauth`，不会进入 Session、日志或仓库；
@@ -116,18 +119,34 @@ sequenceDiagram
 - YouTube 仅支持公开视频搜索；官方 API 无法读写“稍后观看”；
 - Google Maps 当前只负责搜索和路线跳转，不在 Wellphone 内计算路线；
 - Session 对话可在 Server 重启后恢复，运行中的任务和 Tool Call 不恢复；
+- 终态 TaskRecord 与 Broker Channel 当前保留至 Server 重启，尚未实现 TTL 回收；
 - HTTP 通道没有认证，只适用于可信局域网原型；
 - App Intents 尚未接入，当前入口仍是 Wellphone App；
 - MCP Tool Catalog 在 Server 启动时固定，远端工具变化后需要重启刷新；
 - HealthKit 无法向 App 区分“无数据”和“用户拒绝读取”；回答必须保留这一隐私语义；
 - WorkoutKit 计划需要受支持且已配对 Apple Watch；没有手表时会返回能力不可用；
 - 原生 Mail 不提供收件箱读取 API；当前未接入邮箱读取，后续可通过只读 MCP Server 扩展；
+- Reminder 第一版只创建，不查询、编辑、完成、删除或创建重复/位置提醒；EventKit 写入与本地幂等映射之间仍有无法原子提交的崩溃窗口；
 - 照片是否语义匹配最终仍依赖模型判断。
+
+## Trace 与 Eval
+
+Server 在控制台和 `~/.geas/wellphone/logs/wellphone.jsonl` 输出相同的脱敏
+Trace。本地文件上限 5 MB，保留两个备份；使用 `task_id` 串联模型调用、Tool、
+Memory 与任务终态。Trace 不记录 Prompt、回答、Tool 参数或结果，以及照片、健康、
+位置、邮件和 MCP 内容。
+
+Agent Eval Suite `0.3` 包含 23 个代表性案例，覆盖工具选择、精确参数、写入边界、
+Prompt Injection 和虚假完成声明：
+
+```bash
+uv run python -m apps.wellphone.evals.agent
+```
 
 ## 外部服务 OAuth
 
 OAuth 首次授权在 Mac 完成，Wellphone Server 启动期间不会弹出登录页面。先在
-`.env` 配置对应 Client，再运行一次登录命令。
+`.env` 配置对应 MCP Server，再运行一次登录命令。
 
 Notion 使用通用 MCP OAuth：
 

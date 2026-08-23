@@ -20,6 +20,7 @@ from apps.wellphone.config import (
     _load_mcp_servers,
     _load_mcp_tool_allowlists,
 )
+from apps.wellphone.observability import configure_logging, log_event
 from apps.wellphone.protocol import ToolResultEnvelope
 from apps.wellphone.server import create_app
 from apps.wellphone.service import WellphoneService
@@ -472,12 +473,53 @@ def test_wellphone_native_tool_contracts_are_unique_and_bounded() -> None:
         "schedule_workout",
         "remove_scheduled_workout",
         "search_contacts",
+        "create_reminder",
     } <= specs.keys()
     compose = specs["compose_email"]["properties"]
     assert compose["attachment_photo_ids"]["maxItems"] == 3
     assert specs["search_nearby_places"]["properties"]["max_results"][
         "maximum"
     ] == 10
+    reminder = specs["create_reminder"]["properties"]
+    assert reminder["title"] == {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200,
+    }
+    assert reminder["notes"]["maxLength"] == 2_000
+    assert reminder["due_at"]["format"] == "date-time"
+    assert reminder["priority"]["enum"] == ["none", "low", "medium", "high"]
+
+    project = Path(
+        "apps/wellphone/ios/Geas Wellphone.xcodeproj/project.pbxproj"
+    ).read_text()
+    assert project.count("NSRemindersFullAccessUsageDescription") == 2
+
+
+def test_wellphone_file_log_is_private_and_content_free(tmp_path: Path) -> None:
+    logger = logging.getLogger("wellphone")
+    old_handlers = list(logger.handlers)
+    old_level = logger.level
+    old_propagate = logger.propagate
+    logger.handlers.clear()
+    path = tmp_path / "logs" / "wellphone.jsonl"
+    try:
+        configure_logging(path)
+        log_event("test.finished", task_id="task-1", status="completed")
+        for handler in logger.handlers:
+            handler.flush()
+
+        payload = json.loads(path.read_text())
+        assert payload["task_id"] == "task-1"
+        assert "private test prompt" not in path.read_text()
+        assert path.stat().st_mode & 0o777 == 0o600
+        assert path.parent.stat().st_mode & 0o777 == 0o700
+    finally:
+        for handler in logger.handlers:
+            handler.close()
+        logger.handlers[:] = old_handlers
+        logger.setLevel(old_level)
+        logger.propagate = old_propagate
 
 
 def test_broker_redelivers_call_and_accepts_duplicate_result() -> None:
@@ -621,6 +663,9 @@ def test_tool_call_survives_poll_retry_and_run_closes_broker(
     assert by_name["task.created"]["session_id"]
     assert by_name["tool.dispatched"]["call_id"]
     assert by_name["tool.finished"]["status"] == "completed"
+    assert by_name["agent.tool.finished"]["status"] == "completed"
+    assert by_name["model.finished"]["provider"] == "test"
+    assert by_name["model.finished"]["cost_rmb"] == 0
     assert by_name["task.finished"]["status"] == "completed"
     assert by_name["task.finished"]["duration_ms"] >= 0
     assert "organize photos" not in "\n".join(

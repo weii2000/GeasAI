@@ -170,6 +170,7 @@ enum ToolName: String, Sendable {
     case scheduleWorkout = "schedule_workout"
     case removeScheduledWorkout = "remove_scheduled_workout"
     case searchContacts = "search_contacts"
+    case createReminder = "create_reminder"
 
     var requiresPhotoAccess: Bool {
         switch self {
@@ -179,7 +180,7 @@ enum ToolName: String, Sendable {
              .reverseGeocodeLocation, .searchNearbyPlaces,
              .getHealthSummary, .getSleepSummary, .listHealthWorkouts,
              .listScheduledWorkouts, .scheduleWorkout,
-             .removeScheduledWorkout, .searchContacts:
+             .removeScheduledWorkout, .searchContacts, .createReminder:
             false
         case .searchPhotos, .getPhotoDetails, .analyzePhotos, .listAlbums,
              .findAlbum, .createAlbum, .renameAlbum, .deleteAlbum,
@@ -224,6 +225,7 @@ enum ToolName: String, Sendable {
         case .scheduleWorkout: "安排训练"
         case .removeScheduledWorkout: "移除训练计划"
         case .searchContacts: "查找联系人"
+        case .createReminder: "创建提醒"
         }
     }
 }

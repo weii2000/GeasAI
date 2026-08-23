@@ -9,6 +9,7 @@ final class ToolExecutor {
     private let health = HealthService()
     private let workouts = WorkoutService()
     private let contacts = ContactService()
+    private let reminders = ReminderService()
     private var allowedPhotoIDs: Set<String> = []
     private var writableAlbumIDs: Set<String> = []
     private var initialSearchRange: (start: Date, end: Date)?
@@ -47,6 +48,7 @@ final class ToolExecutor {
             }
             let result = try await execute(
                 name: name,
+                taskID: call.taskID,
                 actionID: call.callID,
                 arguments: call.arguments,
                 onProgress: onProgress,
@@ -65,6 +67,7 @@ final class ToolExecutor {
 
     private func execute(
         name: ToolName,
+        taskID: String,
         actionID: String,
         arguments: [String: JSONValue],
         onProgress: (String) -> Void,
@@ -212,6 +215,61 @@ final class ToolExecutor {
                 limit: arguments.requiredInteger("limit")
             )
             return ["count": .number(Double(results.count)), "contacts": .array(results)]
+
+        case .createReminder:
+            let title = try arguments.requiredString("title")
+            let notes: String?
+            if let value = arguments["notes"] {
+                guard let string = value.string else {
+                    throw WellphoneError.invalidArguments("notes 必须是字符串")
+                }
+                notes = string
+            } else {
+                notes = nil
+            }
+            let priority: String
+            if let value = arguments["priority"] {
+                guard let string = value.string else {
+                    throw WellphoneError.invalidArguments("priority 必须是字符串")
+                }
+                priority = string
+            } else {
+                priority = "none"
+            }
+            guard title.count <= 200,
+                  (notes?.count ?? 0) <= 2_000,
+                  ["none", "low", "medium", "high"].contains(priority) else {
+                throw WellphoneError.invalidArguments("提醒标题、备注或优先级无效")
+            }
+            let dueAt: Date?
+            if let value = arguments["due_at"] {
+                guard let string = value.string else {
+                    throw WellphoneError.invalidArguments("due_at 必须是字符串")
+                }
+                dueAt = try parseDate(string)
+            } else {
+                dueAt = nil
+            }
+            if let dueAt, dueAt <= .now {
+                throw WellphoneError.invalidArguments("提醒时间必须晚于当前时间")
+            }
+            try await requireApproval(
+                ToolApproval(
+                    title: "创建提醒？",
+                    message: dueAt.map {
+                        "将创建“\(title)”，到期时间为 \($0.formatted())。"
+                    } ?? "将创建“\(title)”，不设置到期时间。",
+                    destructive: false
+                ),
+                approve
+            )
+            return try await reminders.create(
+                actionID: "\(taskID):\(actionID)",
+                title: title,
+                notes: notes,
+                dueAt: dueAt,
+                priorityName: priority
+            )
 
         case .searchPhotos:
             let start = try parseDate(arguments.requiredString("start"))

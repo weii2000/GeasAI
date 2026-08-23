@@ -5,6 +5,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -17,6 +18,7 @@ from geas.memory import MemoryItem, MemoryService
 
 from .agent import SYSTEM_PROMPT, create_phone_agent, final_text
 from .broker import ToolBroker
+from .observability import RunTracer, log_event
 from .protocol import TaskStatus, ToolResultEnvelope
 
 
@@ -91,29 +93,45 @@ class WellphoneSession:
         history = self.messages[-12:]
         self.messages.append(_message("user", text))
         self.active_task_id = task_id
-        memories = (
-            await self._memory.recall(text)
-            if self._memory is not None
-            else []
+        memory_started = perf_counter()
+        memories = await self._memory.recall(text) if self._memory else []
+        log_event(
+            "memory.recall_finished",
+            task_id=task_id,
+            session_id=self.id,
+            hit_count=len(memories),
+            duration_ms=round((perf_counter() - memory_started) * 1000),
         )
         self.agent.state.system_prompt = _system_prompt(
             history,
             device_context,
             memories,
         )
+        unsubscribe = self.agent.subscribe(RunTracer(task_id, self.id))
         try:
             await self.agent.prompt(text)
             answer = final_text(self.agent)
             self.messages.append(_message("assistant", answer))
             if self._memory is not None:
-                await self._memory.remember_exchange(
+                memory_started = perf_counter()
+                remembered = await self._memory.remember_exchange(
                     task_id,
                     self.id,
                     text,
                     answer,
                 )
+                log_event(
+                    "memory.remember_finished",
+                    task_id=task_id,
+                    session_id=self.id,
+                    remembered_count=remembered,
+                    duration_ms=round(
+                        (perf_counter() - memory_started) * 1000
+                    ),
+                )
             return answer
         finally:
+            unsubscribe()
             # Tool results can contain raw OCR. Keep only the visible,
             # bounded conversation between runs and on disk.
             self.agent.state.messages.clear()

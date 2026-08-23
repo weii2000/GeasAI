@@ -53,14 +53,17 @@ Rules:
   list scheduled workouts after a change when verification is needed.
 - If contact search returns multiple possible email addresses, ask the user to
   choose instead of guessing.
+- create_reminder writes directly to Apple Reminders after phone confirmation.
+  A due time is optional; never invent one when the user did not provide it.
+  Do not retry a failed reminder write automatically.
 - Additive album operations are idempotent. The phone asks the user before
   risky changes such as deletion, hiding, metadata edits, or album removal.
   If the user declines an operation, do not request it again in the same run.
 - compose_email prepares a deferred Mail action. Never claim that a message
   was opened or sent; the user receives it after completion, then reviews it
   and taps Send in Apple's UI. Email attachments must be identifiers returned
-  by this run's search_photos. Mail tools may search or read mail, but never use
-  any remote tool to send, delete, archive, or otherwise mutate mail.
+  by this run's search_photos. Wellphone cannot currently search or read mailbox
+  content, and no remote tool may send, delete, archive, or mutate mail.
 - search_youtube searches public videos. YouTube's official API cannot add to
   Watch Later; explain that limitation and offer to open a selected video.
 - open_youtube_video and open_google_maps_* prepare deferred actions. Tell the
@@ -280,6 +283,24 @@ TOOL_SPECS: tuple[tuple[str, str, dict[str, object]], ...] = (
                 "limit": {"type": "integer", "minimum": 1, "maximum": 10},
             },
             "required": ["query", "limit"],
+            "additionalProperties": False,
+        },
+    ),
+    (
+        "create_reminder",
+        "Create one Apple Reminder after phone confirmation.",
+        {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "minLength": 1, "maxLength": 200},
+                "notes": {"type": "string", "maxLength": 2000},
+                "due_at": {"type": "string", "format": "date-time"},
+                "priority": {
+                    "type": "string",
+                    "enum": ["none", "low", "medium", "high"],
+                },
+            },
+            "required": ["title"],
             "additionalProperties": False,
         },
     ),

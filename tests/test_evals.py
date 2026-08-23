@@ -49,9 +49,9 @@ def test_eval_output_paths_are_stable() -> None:
 def test_wellphone_eval_suite_has_unique_representative_cases() -> None:
     suite = load_wellphone_suite()
 
-    assert suite.version == "0.2"
-    assert len(suite.cases) == 21
-    assert len({case.case_id for case in suite.cases}) == 21
+    assert suite.version == "0.3"
+    assert len(suite.cases) == 23
+    assert len({case.case_id for case in suite.cases}) == 23
 
     youtube = wellphone_tool_result("search_youtube", {})
     photos = wellphone_tool_result("search_photos", {})
@@ -95,7 +95,7 @@ def test_wellphone_eval_runs_stubbed_tool_and_detects_false_claim() -> None:
     )
 
     assert result["passed"] is True
-    assert usages
+    assert len(usages) == 2
     assert all(check.passed for check in checks)
 
     false_claim = score_wellphone_output(

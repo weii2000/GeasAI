@@ -265,6 +265,7 @@
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "连接到同一局域网内 Mac 上运行的 Agent Server。";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "仅在你明确请求位置相关任务时读取一次当前位置。";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "需要完整照片访问权限，以根据你的指令查找照片并整理到相册。";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "按你的明确指令创建系统提醒事项。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -307,6 +308,7 @@
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "连接到同一局域网内 Mac 上运行的 Agent Server。";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "仅在你明确请求位置相关任务时读取一次当前位置。";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "需要完整照片访问权限，以根据你的指令查找照片并整理到相册。";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "按你的明确指令创建系统提醒事项。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

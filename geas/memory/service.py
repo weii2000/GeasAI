@@ -149,7 +149,7 @@ class MemoryService:
             return MemoryDecision(True, message, "gate failed open")
 
     async def _consolidate(self, turns: list[RawTurn]) -> int:
-        payload = {
+        payload: dict[str, object] = {
             "turns": [
                 {
                     "user": turn.user_message,

@@ -1,5 +1,6 @@
 @preconcurrency import Contacts
 @preconcurrency import CoreLocation
+@preconcurrency import EventKit
 @preconcurrency import HealthKit
 import Observation
 @preconcurrency import Photos
@@ -15,10 +16,12 @@ final class PermissionCenter: NSObject, CLLocationManagerDelegate {
     private(set) var contactStatus = "检查中"
     private(set) var workoutStatus = "检查中"
     private(set) var notificationStatus = "检查中"
+    private(set) var reminderStatus = "检查中"
     private(set) var errorMessage: String?
 
     private let locationManager = CLLocationManager()
     private let healthStore = HKHealthStore()
+    private let eventStore = EKEventStore()
 
     override init() {
         super.init()
@@ -51,6 +54,12 @@ final class PermissionCenter: NSObject, CLLocationManagerDelegate {
         case .provisional: "临时授权"
         case .ephemeral: "临时授权"
         case .denied: "未授权"
+        case .notDetermined: "尚未请求"
+        @unknown default: "未知"
+        }
+        reminderStatus = switch EKEventStore.authorizationStatus(for: .reminder) {
+        case .fullAccess: "已授权"
+        case .denied, .restricted, .writeOnly: "未授权"
         case .notDetermined: "尚未请求"
         @unknown default: "未知"
         }
@@ -120,6 +129,15 @@ final class PermissionCenter: NSObject, CLLocationManagerDelegate {
         do {
             _ = try await UNUserNotificationCenter.current()
                 .requestAuthorization(options: [.alert, .sound])
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        await refresh()
+    }
+
+    func requestReminders() async {
+        do {
+            _ = try await eventStore.requestFullAccessToReminders()
         } catch {
             errorMessage = error.localizedDescription
         }

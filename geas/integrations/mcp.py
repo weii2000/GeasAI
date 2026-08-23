@@ -353,7 +353,7 @@ def _create_agent_tool(
                 TextContent(type="text", text="MCP tool completed with no content")
             )
         return AgentToolResult(
-            content=content,
+            content=[*content],
             details=result.structured_content,
         )
 
