@@ -64,7 +64,11 @@ struct SettingsView: View {
                 PermissionRow(name: "照片", status: permissions.photoStatus) {
                     Task { await permissions.requestPhotos() }
                 }
-                PermissionRow(name: "位置", status: permissions.locationStatus) {
+                PermissionRow(
+                    name: "位置",
+                    status: permissions.locationStatus,
+                    actionTitle: permissions.locationActionTitle
+                ) {
                     permissions.requestLocation()
                 }
                 PermissionRow(name: "健康", status: permissions.healthStatus) {
@@ -109,6 +113,7 @@ struct SettingsView: View {
 private struct PermissionRow: View {
     let name: String
     let status: String
+    var actionTitle: String? = "授权"
     let request: () -> Void
 
     var body: some View {
@@ -120,9 +125,11 @@ private struct PermissionRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button("授权", action: request)
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+            if let actionTitle {
+                Button(actionTitle, action: request)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
         }
     }
 }

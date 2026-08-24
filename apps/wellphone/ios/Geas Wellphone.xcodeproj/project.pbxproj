@@ -263,6 +263,7 @@
 				INFOPLIST_KEY_NSContactsUsageDescription = "按你的指令查找联系人邮箱，用于准备邮件草稿。";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "按你的指令读取并汇总活动、睡眠和运动数据。";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "连接到同一局域网内 Mac 上运行的 Agent Server。";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "仅在你明确请求位置相关任务且 Wellphone 位于后台时读取一次当前位置。";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "仅在你明确请求位置相关任务时读取一次当前位置。";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "需要完整照片访问权限，以根据你的指令查找照片并整理到相册。";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "按你的明确指令创建系统提醒事项。";
@@ -306,6 +307,7 @@
 				INFOPLIST_KEY_NSContactsUsageDescription = "按你的指令查找联系人邮箱，用于准备邮件草稿。";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "按你的指令读取并汇总活动、睡眠和运动数据。";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "连接到同一局域网内 Mac 上运行的 Agent Server。";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "仅在你明确请求位置相关任务且 Wellphone 位于后台时读取一次当前位置。";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "仅在你明确请求位置相关任务时读取一次当前位置。";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "需要完整照片访问权限，以根据你的指令查找照片并整理到相册。";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "按你的明确指令创建系统提醒事项。";

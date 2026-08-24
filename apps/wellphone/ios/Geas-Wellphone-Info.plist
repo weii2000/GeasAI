@@ -17,6 +17,7 @@
 	<string>用于把你的语音转换为任务文字；必要时音频可能由 Apple 处理。</string>
 	<key>UIBackgroundModes</key>
 	<array>
+		<string>location</string>
 		<string>processing</string>
 	</array>
 </dict>

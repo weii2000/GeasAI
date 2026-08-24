@@ -37,7 +37,8 @@ final class PermissionCenter: NSObject, CLLocationManagerDelegate {
         @unknown default: "未知"
         }
         locationStatus = switch locationManager.authorizationStatus {
-        case .authorizedAlways, .authorizedWhenInUse: "已授权"
+        case .authorizedAlways: "后台定位已开启"
+        case .authorizedWhenInUse: "仅使用 App 时"
         case .denied, .restricted: "未授权"
         case .notDetermined: "尚未请求"
         @unknown default: "未知"
@@ -90,7 +91,25 @@ final class PermissionCenter: NSObject, CLLocationManagerDelegate {
     }
 
     func requestLocation() {
-        locationManager.requestWhenInUseAuthorization()
+        switch locationManager.authorizationStatus {
+        case .notDetermined:
+            locationManager.requestWhenInUseAuthorization()
+        case .authorizedWhenInUse:
+            locationManager.requestAlwaysAuthorization()
+        case .authorizedAlways, .denied, .restricted:
+            break
+        @unknown default:
+            break
+        }
+    }
+
+    var locationActionTitle: String? {
+        switch locationManager.authorizationStatus {
+        case .notDetermined: "授权定位"
+        case .authorizedWhenInUse: "允许后台定位"
+        case .authorizedAlways, .denied, .restricted: nil
+        @unknown default: nil
+        }
     }
 
     func requestHealth() async {

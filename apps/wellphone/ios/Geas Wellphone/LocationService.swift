@@ -1,6 +1,7 @@
 @preconcurrency import CoreLocation
 import Foundation
 import MapKit
+import UIKit
 
 @MainActor
 final class LocationService {
@@ -114,12 +115,19 @@ private final class OneShotLocationRequest: NSObject, CLLocationManagerDelegate 
     }
 
     func start() async throws -> CLLocation {
-        guard CLLocationManager.locationServicesEnabled(),
-              [.authorizedAlways, .authorizedWhenInUse].contains(
-                manager.authorizationStatus
-              ) else {
+        guard CLLocationManager.locationServicesEnabled() else {
             throw WellphoneError.permissionRequired("定位")
         }
+        let isBackground = UIApplication.shared.applicationState == .background
+        let status = manager.authorizationStatus
+        guard status == .authorizedAlways ||
+                (!isBackground && status == .authorizedWhenInUse) else {
+            let permission = isBackground
+                ? "后台定位（请在设置中选择“始终”）"
+                : "定位"
+            throw WellphoneError.permissionRequired(permission)
+        }
+        manager.allowsBackgroundLocationUpdates = isBackground
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 self.continuation = continuation
@@ -149,6 +157,7 @@ private final class OneShotLocationRequest: NSObject, CLLocationManagerDelegate 
         let continuation = continuation
         self.continuation = nil
         manager.stopUpdatingLocation()
+        manager.allowsBackgroundLocationUpdates = false
         continuation?.resume(returning: location)
     }
 
@@ -156,6 +165,7 @@ private final class OneShotLocationRequest: NSObject, CLLocationManagerDelegate 
         let continuation = continuation
         self.continuation = nil
         manager.stopUpdatingLocation()
+        manager.allowsBackgroundLocationUpdates = false
         continuation?.resume(throwing: error)
     }
 }
