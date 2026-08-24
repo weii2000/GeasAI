@@ -1,6 +1,6 @@
 # Wellphone
 
-Wellphone 是基于 Geas Runtime 实现的 iOS Capability Agent。用户正常使用手机时，Agent 在后台由 iOS 原生 API 或 Server 端 API/MCP 完成任务；它不模拟触摸，不占用屏幕、焦点或键盘。
+Wellphone 是基于 [Geas Runtime](../../) 实现的 iOS Capability Agent。用户正常使用手机时，Agent 在后台由 iOS 原生 API 或 Server 端 API/MCP 完成任务；它不模拟触摸，不占用屏幕、焦点或键盘。
 
 例如，Wellphone 可以在不打扰用户的情况下，把本月的美食照片整理到独立相册，同时梳理一份总结整理到 Notion；又或者搜索附近餐厅，起草一封晚餐邀请邮件由用户确认后发送，同时创建一个 Reminder。
 
